@@ -1,0 +1,7 @@
+data/
+*.egg*
+__pycache__
+.ipynb_checkpoints
+.vscode
+notebooks/*
+!notebooks/example_spline_coupling.ipynb
