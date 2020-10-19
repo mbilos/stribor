@@ -5,3 +5,4 @@ __pycache__
 .vscode
 notebooks/*
 !notebooks/example_spline_coupling.ipynb
+.pytest*
