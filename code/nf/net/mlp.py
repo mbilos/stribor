@@ -13,6 +13,7 @@ class MLP(nn.Module):
     def __init__(self, in_dim, hidden_dims, out_dim, activation='Tanh', final_activation=None, **kwargs):
         super().__init__()
 
+        hidden_dims = hidden_dims[:]
         hidden_dims.append(out_dim)
         layers = [nn.Linear(in_dim, hidden_dims[0])]
 
