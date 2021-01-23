@@ -32,7 +32,7 @@ class Spline(nn.Module):
 
         if spline_type == 'quadratic':
             self.spline = nf.util.unconstrained_rational_quadratic_spline
-            self.derivative_dim = n_bins + 1
+            self.derivative_dim = n_bins - 1
         elif spline_type == 'cubic':
             self.spline = nf.util.unconstrained_cubic_spline
             self.derivative_dim = 2

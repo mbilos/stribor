@@ -33,3 +33,23 @@ def test_spline(input_shape, n_bins, lower, upper, spline_type, latent_dim, num_
     check_jacobian(log_jac_x, log_jac_y)
     if num_layers > 0:
         check_one_training_step(input_shape[-1], model, x, latent)
+
+
+@pytest.mark.parametrize('input_shape', [(1, 1), (2, 10), (10, 2), (7, 4, 5)])
+def test_spline_free_bounding_box_param(input_shape):
+    np.random.seed(123)
+    torch.manual_seed(123)
+
+    x = torch.rand(*input_shape)
+
+    n_bins = 5
+    w = torch.randn(1, n_bins) / 100
+    h = torch.randn(1, n_bins) / 100
+    d = torch.randn(1, n_bins - 1) / 100
+
+    func = nf.util.unconstrained_rational_quadratic_spline
+    y, log_jac_y = func(x, w, h, d, left=-1, bottom=-3, top=2, right=1)
+    x_, log_jac_x = func(y, w, h, d, left=-1, bottom=-3, top=2, right=1, inverse=True)
+
+    check_inverse(x, x_)
+    check_jacobian(log_jac_x, log_jac_y)
