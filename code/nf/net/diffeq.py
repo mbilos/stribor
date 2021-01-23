@@ -2,17 +2,135 @@ import nf
 import torch
 import torch.nn as nn
 
-SMOOTH_ACTIVATIONS = ['Tanh', 'Softplus', 'Elu', 'Identity', 'Sigmoid', None]
+############################################
+# Regular nets, use `divergence=approximate`
+############################################
 
-class DiffeqMLP(nn.Module):
-    def __init__(self, in_dim, hidden_dims, out_dim, activation='Tanh', final_activation=None, **kwargs):
+class DiffeqConcat(nn.Module):
+    def __init__(self):
         super().__init__()
-        assert activation in SMOOTH_ACTIVATIONS and final_activation in SMOOTH_ACTIVATIONS
-        self.net = nf.net.MLP(in_dim + 1, hidden_dims, out_dim, activation, final_activation, **kwargs)
+        self.net = None
 
-    def forward(self, t, x, latent=None):
-        t = torch.ones_like(x[:, :1]) * t
-        input = torch.cat([t, x], 1)
+    def forward(self, t, x, latent=None, **kwargs):
+        t = torch.ones_like(x[..., :1]) * t
+        input = torch.cat([t, x], -1)
         if latent is not None:
-            input = torch.cat([input, latent], 1)
-        return self.net(input)
+            input = torch.cat([input, latent], -1)
+        return self.net(input, **kwargs)
+
+class DiffeqMLP(DiffeqConcat):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.net = nf.net.MLP(*args, **kwargs)
+
+class DiffeqEquivariantNet(DiffeqConcat):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.net = nf.net.EquivariantNet(*args, **kwargs)
+
+class DiffeqSelfAttention(DiffeqConcat):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.net = nf.net.SelfAttention(*args, **kwargs)
+
+
+##########################################################
+# Volume preserving - 0 trace nets, use `divergence=exact`
+##########################################################
+
+class DiffeqZeroTraceMLP(nn.Module):
+    def __init__(self, in_dim, hidden_dims, out_dim, return_log_det_jac=True, **kwargs):
+        super().__init__()
+        self.return_log_det_jac = return_log_det_jac
+        self.net1 = nf.net.MADE(in_dim, hidden_dims, out_dim, natural_ordering=True,
+                                reverse_ordering=False, return_per_dim=True)
+        self.net2 = nf.net.MADE(in_dim, hidden_dims, out_dim, natural_ordering=True,
+                                reverse_ordering=True, return_per_dim=True)
+
+    def forward(self, t, x, **kwargs):
+        y = self.net1(x, **kwargs) + self.net2(x, **kwargs)
+        y = y.reshape(*y.shape[:-2], -1)
+        return (y, torch.zeros_like(x)) if self.return_log_det_jac else y
+
+class DiffeqZeroTraceDeepSet(nn.Module):
+    def __init__(self, in_dim, hidden_dims, out_dim, pooling='max', return_log_det_jac=True, **kwargs):
+        super().__init__()
+        self.elementwise = nf.net.MADE(in_dim, hidden_dims, out_dim, return_per_dim=True)
+        self.interaction = nf.net.ExclusivePooling(in_dim, hidden_dims, out_dim // in_dim, pooling)
+        self.return_log_det_jac = return_log_det_jac
+
+    def forward(self, t, x, mask=None, **kwargs):
+        if mask is None:
+            mask = torch.ones(*x.shape[:-1], 1)
+        y = self.elementwise(x) + self.interaction(t, x, mask=mask)
+        y = y * mask.unsqueeze(-1)
+        y = y.reshape(*y.shape[:-2], -1)
+        return (y, torch.zeros_like(x)) if self.return_log_det_jac else y
+
+class DiffeqZeroTraceAttention(nn.Module):
+    def __init__(self, in_dim, hidden_dims, out_dim, n_heads=1, return_log_det_jac=True, **kwargs):
+        super().__init__()
+        self.n_heads = n_heads
+        self.return_log_det_jac = return_log_det_jac
+
+        self.q = nf.net.MADE(in_dim, hidden_dims[:-1], hidden_dims[-1] * in_dim, return_per_dim=True)
+        self.k = nf.net.MLP(in_dim, hidden_dims[:-1], hidden_dims[-1])
+        self.v = nf.net.MADE(in_dim, hidden_dims[:-1], hidden_dims[-1] * in_dim, return_per_dim=True)
+        self.proj = nf.net.MLP(hidden_dims[-1], [], out_dim // in_dim)
+
+    def forward(self, t, x, mask=None, **kwargs):
+        query = self.q(x).transpose(-2, -3) # (B, N, D) -> (B, D, N, H)
+        value = self.v(x).transpose(-2, -3)
+        key = self.k(x).unsqueeze(-2).repeat_interleave(x.shape[-1], dim=-2).transpose(-2, -3) # (B, D, N, H)
+
+        y = nf.net.attention(query, key, value, self.n_heads, True, mask) # (B, D, N, H)
+        y = y.transpose(-2, -3) # (B, N, D, H)
+        y = self.proj(y).view(*y.shape[:-2], -1) # (B, N, D, O) -> (B, N, D * O)
+
+        return (y, torch.zeros_like(x)) if self.return_log_det_jac else y
+
+
+################################################################
+# Nets with closed form calculated trace, use `divergence=exact`
+################################################################
+
+class DiffeqExactTrace(nn.Module):
+    """ Network with exact trace.
+    Recommended to directly use tested implementations, e.g. `DiffeqExactTraceMLP`.
+    Args:
+        exclusive_net: Hollow Jacobian net, e.g. DiffeqMADE(dim, hidden_dims, dim * hidden_dim)
+        dimwise_net: Per dimension net, e.g. DiffeqMLP(hidden_dim + 2, hidden_dims, 1)
+    """
+    def __init__(self, exclusive_net, dimwise_net, **kwargs):
+        super().__init__()
+        self.exclusive_net = exclusive_net
+        self.dimwise_net = dimwise_net
+
+    def forward(self, t, x, latent=None, **kwargs):
+        params = nf.util.flatten_params(self.exclusive_net, self.dimwise_net)
+        return nf.net.FuncAndDiagJac.apply(self.exclusive_net, self.dimwise_net, t, x, params)
+
+class DiffeqExactTraceMLP(DiffeqExactTrace):
+    """ Exact trace networks that mimics MLP architecture.
+    Args:
+        in_dim: (int) Input dimension
+        hidden_dims: (list) Hidden dimensions, e.g. [64, 64]
+        out_dim: (int) Output dimension
+        latent_dim: (int) Size of latent vector per each dimension
+    """
+    def __init__(self, in_dim, hidden_dims, out_dim, latent_dim, **kwargs):
+        exclusive_net = DiffeqZeroTraceMLP(in_dim, hidden_dims, latent_dim * out_dim, return_log_det_jac=False, return_per_dim=True)
+        dimwise_net = DiffeqMLP(latent_dim + 2, hidden_dims, 1)
+        super().__init__(exclusive_net, dimwise_net)
+
+class DiffeqExactTraceDeepSet(DiffeqExactTrace):
+    def __init__(self, in_dim, hidden_dims, out_dim, latent_dim, pooling='max', **kwargs):
+        exclusive_net = DiffeqZeroTraceDeepSet(in_dim, hidden_dims, out_dim * latent_dim, return_log_det_jac=False)
+        dimwise_net = DiffeqMLP(latent_dim + 2, hidden_dims, 1)
+        super().__init__(exclusive_net, dimwise_net)
+
+class DiffeqExactTraceAttention(DiffeqExactTrace):
+    def __init__(self, in_dim, hidden_dims, out_dim, latent_dim, n_heads=1, **kwargs):
+        exclusive_net = DiffeqZeroTraceAttention(in_dim, hidden_dims, in_dim * latent_dim, n_heads, return_log_det_jac=False)
+        dimwise_net = DiffeqMLP(latent_dim + 2, hidden_dims, 1)
+        super().__init__(exclusive_net, dimwise_net)
