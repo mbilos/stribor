@@ -6,7 +6,7 @@ A normalizing flow library - invertible neural networks that define complicated 
 
 ```
 pip install -r requirements.txt
-pip install -e code/
+pip install -e .
 ```
 
 ## Generate synthetic 2D data
@@ -31,7 +31,7 @@ import torch
 model = nf.Flow(torch.distributions.Normal(0, 1), [nf.Identity()])
 ```
 ```
->> model.forward(torch.Tensor([[1]])) # Returns y and log_jac_diag
+>> model.forward(torch.Tensor([1])) # Returns y and log_jac_diag
 (tensor([1.]), tensor([0.]))
 >> model.sample(5) # Output will differ every time
 tensor([0.1695, 1.9026, 0.4640, 0.7100, 0.2773])

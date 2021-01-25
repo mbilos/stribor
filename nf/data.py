@@ -4,7 +4,7 @@ import torch
 import torch.utils.data as data_utils
 from pathlib import Path
 
-dataset_dir = Path(__file__).parents[2] / 'data'
+dataset_dir = Path(__file__).parents[1] / 'data'
 
 __all__ = ['list_datasets', 'load_dataset']
 
