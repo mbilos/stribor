@@ -7,7 +7,7 @@ from sklearn.utils import shuffle as util_shuffle
 import pathlib
 
 
-dataset_dir = pathlib.Path(__file__).parents[3] / 'data'
+dataset_dir = pathlib.Path(__file__).parents[2] / 'data'
 dataset_dir.mkdir(parents=True, exist_ok=True)
 
 

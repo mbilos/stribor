@@ -12,7 +12,7 @@ pip install -e .
 ## Generate synthetic 2D data
 
 ```
-python code/nf/gen/toy.py --N --seed
+python nf/gen/toy.py --N --seed
 ```
 Default `N=10000` and `seed=123`. Creates 10 datasets in `data/`.
 
@@ -36,12 +36,5 @@ model = nf.Flow(torch.distributions.Normal(0, 1), [nf.Identity()])
 >> model.sample(5) # Output will differ every time
 tensor([0.1695, 1.9026, 0.4640, 0.7100, 0.2773])
 ```
-
-Implemented transformations:
-- Affine
-- Spline
-- Coupling
-- Sigmoid
-- Cumsum
 
 Example runnable notebook can be found in [`notebooks/example_spline_coupling.ipynb`](notebooks/example_spline_coupling.ipynb).
