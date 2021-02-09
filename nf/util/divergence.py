@@ -8,8 +8,18 @@ def divergence_exact(output, input):
         diag[...,i] += torch.autograd.grad(output[...,i].sum(), input, create_graph=True)[0].contiguous()[...,i].contiguous()
     return diag
 
-def divergence_approx(output, input, e):
-    return torch.autograd.grad(output, input, e, create_graph=True)[0] * e
+def divergence_exact_for_sets(output, input):
+    diag = torch.zeros_like(input)
+    for i in range(input.shape[-2]):
+        for j in range(input.shape[-1]):
+            diag[...,i,j] += torch.autograd.grad(output[...,i,j].sum(), input, create_graph=True)[0].contiguous()[...,i,j].contiguous()
+    return diag
+
+def divergence_approx(output, input, e, samples=1):
+    out = 0
+    for _ in range(samples):
+        out += torch.autograd.grad(output, input, e, create_graph=True)[0] * e / samples
+    return out
 
 def divergence_from_jacobian(f, inputs):
     """ Calculates exact divergence for any input shape.

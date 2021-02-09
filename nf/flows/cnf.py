@@ -12,14 +12,15 @@ __all__ = ['ContinuousFlow']
 
 
 class ODEfunc(nn.Module):
-    def __init__(self, diffeq, divergence=None, rademacher=False, has_latent=False, **kwargs):
+    def __init__(self, diffeq, divergence=None, rademacher=False, has_latent=False, set_data=False, **kwargs):
         super().__init__()
-        assert divergence in ['compute', 'approximate', 'exact']
+        assert divergence in ['compute', 'compute_set', 'approximate', 'exact']
 
         self.diffeq = diffeq
         self.rademacher = rademacher
         self.divergence = divergence
         self.has_latent = has_latent
+        self.set_data = set_data
 
         self.register_buffer('_num_evals', torch.tensor(0.))
 
@@ -59,8 +60,11 @@ class ODEfunc(nn.Module):
             with torch.set_grad_enabled(True):
                 y.requires_grad_(True)
                 dy = self.diffeq(t, y, latent=latent, mask=mask)
-                if not self.training or self.divergence == 'compute':
-                    divergence = nf.util.divergence_exact(dy, y)
+                if not self.training or 'compute' in self.divergence:
+                    if self.set_data or self.divergence == 'compute_set':
+                        divergence = nf.util.divergence_exact_for_sets(dy, y)
+                    else:
+                        divergence = nf.util.divergence_exact(dy, y)
                 else:
                     divergence = nf.util.divergence_approx(dy, y, self._e)
 
@@ -69,7 +73,7 @@ class ODEfunc(nn.Module):
 
 class ContinuousFlow(nn.Module):
     def __init__(self, dim, net=None, T=1.0, divergence='approximate', use_adjoint=True, has_latent=False,
-                 solver='dopri5', solver_options={}, test_solver=None, test_solver_options=None,
+                 solver='dopri5', solver_options={}, test_solver=None, test_solver_options=None, set_data=False,
                  rademacher=False, atol=1e-5, rtol=1e-3, **kwargs):
         """
         Continuous normalizing flow.
@@ -78,13 +82,14 @@ class ContinuousFlow(nn.Module):
             dim: Input data dimension
             net: Neural net that defines a differential equation, instance of `net`
             T: Integrate from 0 until T (Default: 1.0)
-            divergence: How to obtain divergence; ['approximate', 'compute', 'exact']
+            divergence: How to obtain divergence; ['approximate', 'compute', 'compute_set', 'exact']
             use_adjoint: Whether to use adjoint method for backpropagation
             solver: ODE black-box solver, adaptive: dopri5, dopri8, bosh3, adaptive_heun;
                 exact-step: euler, midpoint, rk4, explicit_adams, implicit_adams
             solver_options: Additional options, e.g. {'step_size': 10}
             test_solver: Same as solver, used during evaluation
             test_solver_options: Same as solver_options, used during evaluation
+            set_data: If data is of shape (..., N, D)
             rademacher: Whether to use rademacher sampling (Default: False)
             atol: Tolerance (Default: 1e-5)
             rtol: Tolerance (Default: 1e-3)
@@ -94,7 +99,7 @@ class ContinuousFlow(nn.Module):
         self.T = T
         self.dim = dim
 
-        self.odefunc = ODEfunc(net, divergence, rademacher, has_latent)
+        self.odefunc = ODEfunc(net, divergence, rademacher, has_latent, set_data)
 
         self.integrate = odeint_adjoint if use_adjoint else odeint
 

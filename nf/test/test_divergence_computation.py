@@ -8,24 +8,32 @@ import torch.nn as nn
 def test_exact_divergence_from_jacobian(input_dim):
     torch.manual_seed(123)
 
-    x = torch.rand(*input_dim)
+    x = torch.rand(*input_dim).requires_grad_(True)
 
     # Linear function
     f1 = lambda x: x
     div1 = nf.util.divergence_from_jacobian(f1, x)
-    assert torch.isclose(div1, torch.ones_like(x)).all(), 'Incorrect divergence of linear function'
+    assert torch.isclose(div1, torch.ones_like(x)).all(), 'Incorrect divergence from Jacobian of linear function'
+    div1 = nf.util.divergence_exact(f1(x), x)
+    assert torch.isclose(div1, torch.ones_like(x)).all(), 'Incorrect divergence from Jacobian of linear function'
 
     # Polynomial
     f2 = lambda x: x**3 - 4 * x**2 + 7 * x - 14
     div2 = nf.util.divergence_from_jacobian(f2, x)
-    assert torch.isclose(div2, 3 * x**2 - 8 * x + 7).all(), 'Incorrect divergence of polynomial function'
+    assert torch.isclose(div2, 3 * x**2 - 8 * x + 7).all(), 'Incorrect divergence from Jacobian of polynomial function'
+    div2 = nf.util.divergence_exact(f2(x), x)
+    assert torch.isclose(div2, 3 * x**2 - 8 * x + 7).all(), 'Incorrect exact divergence of polynomial function'
 
     # Linear layer
     f3 = nn.Linear(input_dim[-1], input_dim[-1])
     div3 = nf.util.divergence_from_jacobian(f3, x)
-    assert torch.isclose(div3, torch.diagonal(f3.weight).expand(input_dim)).all(), 'Incorrect divergence of linear layer'
+    assert torch.isclose(div3, torch.diagonal(f3.weight).expand(input_dim)).all(), 'Incorrect divergence from Jacobian of linear layer'
+    div3 = nf.util.divergence_exact(f3(x), x)
+    assert torch.isclose(div3, torch.diagonal(f3.weight).expand(input_dim)).all(), 'Incorrect exact divergence of linear layer'
 
-    # Sum
-    f4 = lambda x: x.sum().expand_as(x)
+    # Deep set
+    f4 = lambda x: x**2 + (x**3).sum(-2, keepdim=True).repeat_interleave(x.shape[-2], dim=-2)
     div4 = nf.util.divergence_from_jacobian(f4, x)
-    assert torch.isclose(div4, torch.ones_like(x)).all(), 'Incorrect divergence of sum operation'
+    assert torch.isclose(div4, 2 * x + 3 * x**2).all(), 'Incorrect divergence from Jacobian of deepset operation'
+    div4 = nf.util.divergence_exact_for_sets(f4(x), x)
+    assert torch.isclose(div4, 2 * x + 3 * x**2).all(), 'Incorrect exact divergence of deepset operation'
