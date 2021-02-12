@@ -24,7 +24,7 @@ class ExclusivePooling(nn.Module):
         super().__init__()
         self.pooling = pooling
         self.in_dim = in_dim
-        self.set_emb = nf.net.MLP(in_dim, hidden_dims, out_dim)
+        self.set_emb = nf.net.DiffeqMLP(in_dim + 1, hidden_dims, out_dim)
 
     def forward(self, t, x, mask=None, **kwargs):
         if mask is None:
@@ -32,7 +32,7 @@ class ExclusivePooling(nn.Module):
         else:
             mask = mask[...,0,None]
 
-        x = self.set_emb(x) * mask
+        x = self.set_emb(t, x) * mask
         if self.pooling == 'mean':
             y = exclusive_mean_pooling(x, mask)
         elif self.pooling == 'max':
