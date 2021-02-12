@@ -18,7 +18,7 @@ def test_cnf_computation(input_shape, latent_dim):
     in_dim = dim if latent_dim is None else dim + latent_dim
     transforms = [nf.ContinuousFlow(dim, net=nf.net.DiffeqMLP(in_dim + 1, [32], dim), atol=1e-8, rtol=1e-8,
                   divergence='compute', solver='dopri5', has_latent=latent is not None)]
-    model = nf.Flow(torch.distributions.Normal(torch.zeros(dim), torch.ones(dim)), transforms)
+    model = nf.Flow(nf.Normal(torch.zeros(dim), torch.ones(dim)), transforms)
 
     y, log_jac_y = model.forward(x, latent=latent)
     x_, log_jac_x = model.inverse(y, latent=latent)
@@ -50,7 +50,7 @@ def test_cnf_definition(input_shape, latent_dim, diffeq, hidden_dims, solver, so
                             solver_options=solver_options,
                             rademacher=rademacher,
                             use_adjoint=use_adjoint)
-    model = nf.Flow(torch.distributions.Normal(torch.zeros(dim), torch.ones(dim)), [cnf])
+    model = nf.Flow(nf.Normal(torch.zeros(dim), torch.ones(dim)), [cnf])
 
 @pytest.mark.parametrize('input_shape', [(1, 1, 1), (3, 4, 5), (2, 3, 4, 5)])
 def test_diffeq_equivariant(input_shape):
@@ -59,7 +59,7 @@ def test_diffeq_equivariant(input_shape):
     dim = input_shape[-1]
     cnf = nf.ContinuousFlow(dim, net=nf.net.DiffeqEquivariantNet(dim + 1, [32], dim), atol=1e-8, rtol=1e-8,
                             divergence='compute', solver='dopri5')
-    model = nf.Flow(torch.distributions.Normal(torch.zeros(dim), torch.ones(dim)), [cnf])
+    model = nf.Flow(nf.Normal(torch.zeros(dim), torch.ones(dim)), [cnf])
 
     x = torch.rand(*input_shape)
 
@@ -77,7 +77,7 @@ def test_diffeq_self_attention(input_shape):
     dim = input_shape[-1]
     cnf = nf.ContinuousFlow(dim, net=nf.net.DiffeqSelfAttention(dim + 1, [32], dim), atol=1e-8, rtol=1e-8,
                             divergence='compute', solver='dopri5')
-    model = nf.Flow(torch.distributions.Normal(torch.zeros(dim), torch.ones(dim)), [cnf])
+    model = nf.Flow(nf.Normal(torch.zeros(dim), torch.ones(dim)), [cnf])
 
     x = torch.rand(*input_shape)
 

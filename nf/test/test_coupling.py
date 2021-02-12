@@ -5,7 +5,7 @@ import nf
 from nf.test.base import check_inverse, check_jacobian, check_one_training_step
 
 def build_coupling_flow(dim, hidden_dims, latent_dim, mask, flow_type, num_layers):
-    base_dist = torch.distributions.Normal(torch.zeros(dim), torch.ones(dim))
+    base_dist = nf.Normal(torch.zeros(dim), torch.ones(dim))
     transforms = []
     for _ in range(num_layers):
         lat_dim = hidden_dims[-1]

@@ -28,7 +28,7 @@ To define a normalizing flow, define a base distribution and a series of transfo
 ```
 import nf
 import torch
-model = nf.Flow(torch.distributions.Normal(0, 1), [nf.Identity()])
+model = nf.Flow(nf.Normal(0, 1), [nf.Identity()])
 ```
 ```
 >> model.forward(torch.Tensor([1])) # Returns y and log_jac_diag

@@ -11,7 +11,7 @@ class Flow(nn.Module):
         transforms: List of transformations from `nf.flows`
 
     Example:
-    >> flow = nf.Flow(torch.distributions.Normal(0, 1), [nf.Identity()])
+    >> flow = nf.Flow(nf.Normal(0, 1), [nf.Identity()])
     >> flow.forward(torch.Tensor([[1]])) # Returns y and log_jac_diag
     (tensor([1.]), tensor([0.]))
     >> flow.sample(5) # Output will differ every time
@@ -59,8 +59,8 @@ class Flow(nn.Module):
             log_prob: Log-probability of the input (..., 1)
         """
         x, log_jac_diag = self.inverse(x, **kwargs)
-        log_prob = (self.base_dist.log_prob(x) + log_jac_diag).sum(-1, keepdim=True)
-        return log_prob
+        log_prob = self.base_dist.log_prob(x) + log_jac_diag.sum(-1)
+        return log_prob.unsqueeze(-1)
 
     def sample(self, num_samples, latent=None, mask=None, **kwargs):
         """ Transforms samples from a base to target distribution.

@@ -5,7 +5,7 @@ import nf
 from nf.test.base import check_inverse, check_jacobian, check_one_training_step
 
 def build_affine(dim, num_layers, latent_dim):
-    base_dist = torch.distributions.Normal(torch.zeros(dim), torch.ones(dim))
+    base_dist = nf.Normal(torch.zeros(dim), torch.ones(dim))
     transforms = []
     for _ in range(num_layers):
         transforms.append(nf.Affine(dim, latent_dim=latent_dim))

@@ -5,7 +5,7 @@ import nf
 from nf.test.base import check_inverse, check_jacobian, check_one_training_step
 
 def build_spline(dim, n_bins, lower, upper, spline_type, latent_dim, num_layers):
-    base_dist = torch.distributions.Normal(torch.zeros(dim), torch.ones(dim))
+    base_dist = nf.Normal(torch.zeros(dim), torch.ones(dim))
     transforms = []
     for _ in range(num_layers):
         transforms.append(nf.Spline(dim, n_bins=n_bins, lower=lower, upper=upper, spline_type=spline_type, latent_dim=latent_dim))
