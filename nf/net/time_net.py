@@ -16,6 +16,7 @@ class TimeLinear(nn.Module):
     def __init__(self, out_dim, **kwargs):
         super().__init__()
         self.scale = nn.Parameter(torch.randn(out_dim))
+        nn.init.xavier_uniform_(self.scale)
 
     def forward(self, t):
         return self.scale * t
@@ -34,8 +35,10 @@ class TimeLog(TimeLinear):
 class TimeFourier(nn.Module):
     def __init__(self, out_dim, hidden_dim, **kwargs):
         super().__init__()
-        self.weight = nn.Parameter(torch.randn(out_dim, hidden_dim))
-        self.scale = nn.Parameter(torch.randn(out_dim, hidden_dim))
+        self.weight = nn.Parameter(torch.Tensor(out_dim, hidden_dim))
+        self.scale = nn.Parameter(torch.Tensor(out_dim, hidden_dim))
+        nn.init.xavier_uniform_(self.weight)
+        nn.init.xavier_uniform_(self.scale)
 
     def forward(self, t):
         t = t.unsqueeze(-1)
