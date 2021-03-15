@@ -8,8 +8,8 @@ def check_jacobian(jac, jac_inverse):
     assert torch.isclose(jac, -jac_inverse, rtol=1e-4, atol=1e-4).all(), \
         "Inverse jacobian for a given forward jacobian is not correct."
 
-def check_one_training_step(dim, model, x, latent):
-    log_prob = model.log_prob(x, latent=latent)
+def check_one_training_step(dim, model, x, latent, **kwargs):
+    log_prob = model.log_prob(x, latent=latent, **kwargs)
     loss = -log_prob.sum(-1).mean()
     loss.backward()
 
