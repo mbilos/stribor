@@ -5,3 +5,4 @@ from .cubic_spline import *
 from .visualize import *
 from .divergence import *
 from .flatten_params import *
+from .safe_softmax import *

@@ -4,9 +4,9 @@ import torch
 __all__ = ['get_mask']
 
 def get_mask(mask):
-    if mask == 'ordered_right_half':
+    if mask == 'ordered_right_half' or mask == 'ordered_0':
         return ordered(ratio_zero=0.5, right_zero=False)
-    elif mask == 'ordered_left_half':
+    elif mask == 'ordered_left_half' or mask == 'ordered_1':
         return ordered(ratio_zero=0.5, right_zero=True)
     elif mask == 'random_half':
         return random(ratio_zero=0.5)

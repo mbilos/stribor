@@ -73,7 +73,7 @@ def test_diffeq_exact_trace_deepset(input_shape, hidden_dims, latent_dim, poolin
     check_if_model_is_implemented_correctly(input_shape, model)
 
 
-@pytest.mark.parametrize('input_shape', [(1, 1, 8), (3, 7, 2), (2, 3, 5, 2)])
+@pytest.mark.parametrize('input_shape', [(1, 2, 8), (3, 7, 2), (2, 3, 5, 2)])
 @pytest.mark.parametrize('hidden_dims', [[64, 32]])
 @pytest.mark.parametrize('latent_dim', [1, 3, 7])
 @pytest.mark.parametrize('n_heads', [1, 2, 8])
