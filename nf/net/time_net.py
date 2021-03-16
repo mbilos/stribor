@@ -15,7 +15,7 @@ class TimeIdentity(nn.Module):
 class TimeLinear(nn.Module):
     def __init__(self, out_dim, **kwargs):
         super().__init__()
-        self.scale = nn.Parameter(torch.randn(out_dim))
+        self.scale = nn.Parameter(torch.randn(1, out_dim))
         nn.init.xavier_uniform_(self.scale)
 
     def forward(self, t):
@@ -29,7 +29,7 @@ class TimeTanh(TimeLinear):
 
 class TimeLog(TimeLinear):
     def forward(self, t):
-        return torch.log(self.scale.exp() * t) + 1
+        return torch.log(self.scale.exp() * t + 1)
 
 
 class TimeFourier(nn.Module):
