@@ -69,8 +69,8 @@ class ContinuousAffineCoupling(nn.Module):
     which now depends on time `t`.
 
     Args:
-        net: Instance of `nf.net`. Output shape must be `2 * dim`.
-        time_net: Instance of `nf.net.time_net`. Output shape must be `2 * dim`.
+        net: Instance of `nf.net`. Output dim must be `2 * dim`.
+        time_net: Instance of `nf.net.time_net`. Same output dim as `net`.
         mask: Mask name, e.g. 'ordered_right_half', see `nf.util.mask` for other options.
     """
     def __init__(self, net, time_net, mask, **kwargs):
@@ -91,12 +91,12 @@ class ContinuousAffineCoupling(nn.Module):
             z = torch.cat([z, latent], -1)
 
         scale, shift = self.net(z).chunk(2, dim=-1)
-        time_scale, time_shift = self.time_net(t).chunk(2, dim=-1)
+        t_scale, t_shift = self.time_net(t).chunk(2, dim=-1)
 
-        y = x * torch.exp(scale * time_scale) + shift * time_shift
+        y = x * torch.exp(scale * t_scale) + shift * t_shift
 
         y = y * (1 - mask) + x * mask
-        ljd = scale * time_scale * (1 - mask)
+        ljd = scale * t_scale * (1 - mask)
 
         return y, ljd
 
@@ -107,10 +107,10 @@ class ContinuousAffineCoupling(nn.Module):
             z = torch.cat([z, latent], -1)
 
         scale, shift = self.net(z).chunk(2, dim=-1)
-        time_scale, time_shift = self.time_net(t).chunk(2, dim=-1)
+        t_scale, t_shift = self.time_net(t).chunk(2, dim=-1)
 
-        x = (y - shift * time_shift) * torch.exp(-scale * time_scale)
+        x = (y - shift * t_shift) * torch.exp(-scale * t_scale)
         x = x * (1 - mask) + y * mask
-        ljd = -scale * time_scale * (1 - mask)
+        ljd = -scale * t_scale * (1 - mask)
 
         return x, ljd

@@ -51,7 +51,7 @@ def build_continuous_coupling_flow(dim, hidden_dims, latent_dim, mask, time_net,
             in_dim += latent_dim
         transforms.append(nf.ContinuousAffineCoupling(
             nf.net.MLP(in_dim, hidden_dims, 2 * dim),
-            getattr(nf.net, time_net)(2 * dim),
+            getattr(nf.net, time_net)(2 * dim, hidden_dim=hidden_dims[-1]),
             mask=mask
         ))
     return nf.Flow(base_dist, transforms)
@@ -60,7 +60,7 @@ def build_continuous_coupling_flow(dim, hidden_dims, latent_dim, mask, time_net,
 @pytest.mark.parametrize('hidden_dims', [[32], [32, 64]])
 @pytest.mark.parametrize('latent_dim', [None, 1, 32])
 @pytest.mark.parametrize('mask', ['ordered_left_half'])
-@pytest.mark.parametrize('time_net', ['TimeIdentity'])
+@pytest.mark.parametrize('time_net', ['TimeIdentity', 'TimeLinear', 'TimeTanh', 'TimeLog', 'TimeFourier'])
 @pytest.mark.parametrize('num_layers', [1, 3])
 def test_contiouous_coupling_flow(input_shape, hidden_dims, latent_dim, mask, time_net, num_layers):
     np.random.seed(123)

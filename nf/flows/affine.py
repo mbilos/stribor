@@ -78,3 +78,85 @@ class AffineFixed(nn.Module):
     def inverse(self, y, **kwargs):
         x = (y - self.shift) / self.scale
         return x, -self.scale.log().expand_as(x)
+
+
+class AffinePLU(nn.Module):
+    """
+    Affine layer Wx+b where W=PLU correspoding to PLU factorization.
+
+    Args:
+        dim: Dimension of input data.
+    """
+    def __init__(self, dim, **kwargs):
+        super().__init__()
+
+        self.P = torch.eye(dim)[torch.randperm(dim)]
+        self.weight = nn.Parameter(torch.Tensor(dim, dim))
+        self.log_diag = nn.Parameter(torch.Tensor(1, dim))
+        self.bias = nn.Parameter(torch.Tensor(1, dim))
+        nn.init.xavier_uniform_(self.weight)
+        nn.init.xavier_uniform_(self.log_diag)
+        nn.init.xavier_uniform_(self.bias)
+
+    def get_LU(self):
+        eye = torch.eye(self.weight.shape[1])
+        L = torch.tril(self.weight, -1) + eye
+        U = torch.triu(self.weight, 1) + eye * self.log_diag.exp()
+        return L, U
+
+    def forward(self, x, **kwargs):
+        """ Input: x (..., dim) """
+        L, U = self.get_LU()
+        y = (self.P @ (L @ (U @ x.unsqueeze(-1)))).squeeze(-1) + self.bias
+        ljd = self.log_diag.expand_as(x)
+        return y, ljd
+
+    def inverse(self, y, **kwargs):
+        L, U = self.get_LU()
+        y = torch.triangular_solve(self.P.T @ (y - self.bias).unsqueeze(-1), L, upper=False)[0]
+        x = torch.triangular_solve(y, U, upper=True)[0].squeeze(-1)
+        ljd = -self.log_diag.expand_as(x)
+        return x, ljd
+
+
+class ContinuousAffinePLU(nn.Module):
+    """
+    Continuous version of `AffinePLU` without P.
+    Weights and biases depend on time.
+
+    Args:
+        dim: Dimension of input data.
+        time_net: Instance of `nf.net.time_net`.
+            Must have output of size `dim^2 + dim`.
+    """
+    def __init__(self, dim, time_net, **kwargs):
+        super().__init__()
+
+        self.dim = dim
+        self.time_net = time_net
+
+    def get_params(self, t):
+        params = self.time_net(t)
+        b, W = params[...,:self.dim], params[...,self.dim:]
+        W = W.view(*W.shape[:-1], self.dim, self.dim)
+
+        eye = torch.eye(self.dim)
+        log_D = W.diagonal(dim1=-2, dim2=-1)
+        L = torch.tril(W, -1) + eye
+        U = torch.triu(W, 1) + eye * log_D.unsqueeze(-1).exp()
+
+        return L, log_D, U, b
+
+    def forward(self, x, t, **kwargs):
+        """ Input: x (..., dim); t (..., 1) """
+        L, log_D, U, b = self.get_params(t)
+        y = (L @ (U @ x.unsqueeze(-1))).squeeze(-1) + b
+        ljd = log_D.expand_as(x)
+        return y, ljd
+
+    def inverse(self, y, t, **kwargs):
+        L, log_D, U, b = self.get_params(t)
+        y = torch.triangular_solve((y - b).unsqueeze(-1), L, upper=False)[0]
+        x = torch.triangular_solve(y, U, upper=True)[0].squeeze(-1)
+        ljd = -log_D.expand_as(x)
+        return x, ljd
