@@ -160,3 +160,40 @@ class ContinuousAffinePLU(nn.Module):
         x = torch.triangular_solve(y, U, upper=True)[0].squeeze(-1)
         ljd = -log_D.expand_as(x)
         return x, ljd
+
+
+class AffineExponential(nn.Module):
+    def __init__(self, dim, bias=True, **kwargs):
+        super().__init__()
+
+        self.weight = nn.Parameter(torch.Tensor(dim, dim))
+        nn.init.xavier_uniform_(self.weight)
+        if bias:
+            self.bias = nn.Parameter(torch.Tensor(1, dim))
+            nn.init.xavier_uniform_(self.bias)
+
+    def get_time(self, t, x):
+        if isinstance(t, float) or isinstance(t, int):
+            t = torch.ones(*x.shape[:-1], 1) * t
+        return t.unsqueeze(-1)
+
+    def forward(self, x, t=1, **kwargs):
+        """ Input: x (..., dim); t (..., 1) """
+        t = self.get_time(t, x)
+
+        y = (torch.matrix_exp(self.weight * t) @ x.unsqueeze(-1)).squeeze(-1)
+        if hasattr(self, 'bias'):
+            y = y + self.bias * t.squeeze(-1)
+
+        ljd = (self.weight * t).diagonal(dim1=-2, dim2=-1)
+        return y, ljd
+
+    def inverse(self, y, t=1, **kwargs):
+        t = -self.get_time(t, y)
+
+        if hasattr(self, 'bias'):
+            y = y - self.bias * t.squeeze(-1).abs()
+        x = (torch.matrix_exp(self.weight * t) @ y.unsqueeze(-1)).squeeze(-1)
+
+        ljd = (self.weight * t).diagonal(dim1=-2, dim2=-1)
+        return x, ljd
