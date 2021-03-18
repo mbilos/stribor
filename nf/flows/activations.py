@@ -20,6 +20,13 @@ class ELU(nn.Module):
         return x, ljd
 
 class LeakyReLU(nn.Module):
+    def __init__(self, dim=None, **kwargs):
+        super().__init__()
+        if dim is None:
+            self.scale = 1
+        else:
+            self.scale = nn.Parameter(torch.Tensor(dim).uniform_(0.001, 0.1))
+
     def leaky_relu(self, x, t):
         zeros = torch.zeros_like(x)
         y = torch.max(zeros, x) + t * torch.min(zeros, x)
@@ -30,7 +37,7 @@ class LeakyReLU(nn.Module):
         if isinstance(t, int) or isinstance(t, float):
             t = torch.Tensor([t])
         else: # If t is tensor, treat it like time, identitiy at t=0
-            t = 1 - torch.tanh(t)
+            t = 1 - torch.tanh(F.relu(self.scale) * t)
 
         y, ljd = self.leaky_relu(x, 1 / t if reverse else t)
         return y, ljd
