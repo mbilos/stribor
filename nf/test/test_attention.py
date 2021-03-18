@@ -20,7 +20,7 @@ def test_attention_equivariance_and_masking(input_dim, hidden_dims, out_dim, n_h
     y_flip = model(x_flip, x_flip, x_flip)
     y_flip = torch.flip(y_flip, [-2]) # Flip back to original order
 
-    assert torch.isclose(y, y_flip, atol=1e-5, rtol=1e-5).all(), 'Attention should be permutation invariant'
+    assert torch.isclose(y, y_flip, atol=1e-5).all(), 'Attention should be permutation invariant'
 
     # Check if masking works
     mask = torch.rand(*input_dim[:-1], 1).round()
@@ -29,4 +29,4 @@ def test_attention_equivariance_and_masking(input_dim, hidden_dims, out_dim, n_h
     x_perm = x + x * (1 - mask) * torch.rand(*input_dim)
     y_perm = model(x_perm, x_perm, x_perm, mask)
 
-    assert torch.isclose(y, y_perm, atol=1e-5, rtol=1e-5).all(), 'Masking in attention doesn\'t work'
+    assert torch.isclose(y, y_perm, atol=1e-5).all(), 'Masking in attention doesn\'t work'

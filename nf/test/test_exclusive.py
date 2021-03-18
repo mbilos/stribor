@@ -18,7 +18,7 @@ def test_exclusive_set_net_zero_trace(input_dim, hidden_dims, out_dim, pooling):
     trace_exact = nf.util.divergence_from_jacobian(f, x)
 
     assert trace_exact.sum() == 0
-    assert torch.isclose(trace_exact, torch.zeros_like(trace_exact), atol=1e-6, rtol=1e-6).all()
+    assert torch.isclose(trace_exact, torch.zeros_like(trace_exact), atol=1e-6).all()
 
 
 @pytest.mark.parametrize('input_dim', [(1, 1, 1), (10, 1, 1), (4, 4, 1), (3, 5, 2), (5, 3, 2, 3)])
@@ -38,4 +38,4 @@ def test_exclusive_set_net_masking(input_dim, pooling):
     x_perm = x + x * (1 - mask) * torch.rand(*input_dim)
     y2 = model(t, x_perm, mask)
 
-    assert torch.isclose(y1, y2, atol=1e-5, rtol=1e-5).all()
+    assert torch.isclose(y1, y2, atol=1e-5).all()

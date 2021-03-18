@@ -29,7 +29,7 @@ def divergence_from_jacobian(f, inputs):
     """
     if not isinstance(inputs, tuple):
         inputs = (inputs,)
-    jac = torch.autograd.functional.jacobian(f, inputs)
+    jac = torch.autograd.functional.jacobian(f, inputs, vectorize=True)
     div = tuple(torch.diag(d.view(np.prod(x.shape), -1)).view(*x.shape) for d, x in zip(jac, inputs))
     if len(div) == 1:
         div = div[0]
