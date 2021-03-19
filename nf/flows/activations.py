@@ -23,7 +23,7 @@ class LeakyReLU(nn.Module):
     def __init__(self, dim=None, **kwargs):
         super().__init__()
         if dim is None:
-            self.scale = 1
+            self.scale = torch.Tensor([1])
         else:
             self.scale = nn.Parameter(torch.Tensor(dim).uniform_(0.001, 0.1))
 
