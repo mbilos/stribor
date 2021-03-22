@@ -22,15 +22,25 @@ def divergence_approx(output, input, e, samples=1):
     return out
 
 def divergence_from_jacobian(f, inputs):
-    """ Calculates exact divergence for any input shape.
+    """
+    Calculates exact divergence for any input shape.
+    Best used for input-output pairs with the same shape.
+
     Args:
         f: (callable) function that transforms a single or tuple of inputs to an output of same size
         inputs: (tensor) or (tuple of tensors)
     """
     if not isinstance(inputs, tuple):
         inputs = (inputs,)
+
+    output = f(*inputs)
     jac = torch.autograd.functional.jacobian(f, inputs, vectorize=True)
-    div = tuple(torch.diag(d.view(np.prod(x.shape), -1)).view(*x.shape) for d, x in zip(jac, inputs))
+
+    def get_diagonal(jac, x):
+        smaller_shape = output if np.prod(output.shape) < np.prod(x.shape) else x
+        return torch.diag(jac.view(np.prod(x.shape), -1)).view(*smaller_shape.shape)
+
+    div = tuple(get_diagonal(d, x) for d, x in zip(jac, inputs))
     if len(div) == 1:
         div = div[0]
     return div
