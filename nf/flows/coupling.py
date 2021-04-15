@@ -33,9 +33,9 @@ class Coupling(nn.Module):
     def get_mask(self, x):
         if self.set_data:
             *rest, N, D = x.shape
-            return self.mask_func(N).unsqueeze(-1).expand(*rest, N, D)
+            return self.mask_func(N).unsqueeze(-1).expand(*rest, N, D).to(x)
         else:
-            return self.mask_func(x.shape[-1]).expand_as(x)
+            return self.mask_func(x.shape[-1]).expand_as(x).to(x)
 
     def forward(self, x, latent=None, **kwargs):
         mask = self.get_mask(x)
@@ -81,7 +81,7 @@ class ContinuousAffineCoupling(nn.Module):
         self.time_net = time_net
 
     def get_mask(self, x):
-        return self.mask_func(x.shape[-1]).expand_as(x)
+        return self.mask_func(x.shape[-1]).expand_as(x).to(x)
 
     def forward(self, x, t, latent=None, **kwargs):
         """ Input: x (..., dim), t (..., 1) """
