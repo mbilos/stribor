@@ -173,11 +173,13 @@ class AffineExponential(nn.Module):
             nn.init.xavier_uniform_(self.bias)
 
     def get_time(self, t, x):
+        if t is None:
+            t = 1.
         if isinstance(t, float) or isinstance(t, int):
             t = torch.ones(*x.shape[:-1], 1) * t
         return t.unsqueeze(-1)
 
-    def forward(self, x, t=1, **kwargs):
+    def forward(self, x, t=None, **kwargs):
         """ Input: x (..., dim); t (..., 1) """
         t = self.get_time(t, x)
 
@@ -188,7 +190,7 @@ class AffineExponential(nn.Module):
         ljd = (self.weight * t).diagonal(dim1=-2, dim2=-1)
         return y, ljd
 
-    def inverse(self, y, t=1, **kwargs):
+    def inverse(self, y, t=None, **kwargs):
         t = -self.get_time(t, y)
 
         if hasattr(self, 'bias'):
