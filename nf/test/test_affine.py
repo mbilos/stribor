@@ -45,7 +45,7 @@ def build_continuous_affine(dim, time_net, num_layers):
 @pytest.mark.parametrize('input_shape', [(1, 1), (2, 10), (10, 2), (7, 4, 5)])
 @pytest.mark.parametrize('time_net', ['TimeLinear', 'TimeTanh', 'TimeLog', 'TimeFourier'])
 @pytest.mark.parametrize('num_layers', [1, 3])
-def test_contiouous_coupling_flow(input_shape, time_net, num_layers):
+def test_contiouous_affine_flow(input_shape, time_net, num_layers):
     np.random.seed(123)
     torch.manual_seed(123)
 

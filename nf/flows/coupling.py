@@ -73,9 +73,12 @@ class ContinuousAffineCoupling(nn.Module):
         time_net: Instance of `nf.net.time_net`. Same output dim as `net`.
         mask: Mask name, e.g. 'ordered_right_half', see `nf.util.mask` for other options.
     """
-    def __init__(self, net, time_net, mask, **kwargs):
+    def __init__(self, dim, net, time_net, mask, **kwargs):
         super().__init__()
 
+        self.dim = dim
+        if dim == 1 and mask != 'none':
+            raise ValueError('When dim=1, mask has to be `none`')
         self.net = net
         self.mask_func = nf.util.mask.get_mask(mask) # Initializes mask generator
         self.time_net = time_net
@@ -87,6 +90,8 @@ class ContinuousAffineCoupling(nn.Module):
         """ Input: x (..., dim), t (..., 1) """
         mask = self.get_mask(x)
         z = torch.cat([x * mask, t], -1)
+        if self.dim == 1:
+            z = z * 0
         if latent is not None:
             z = torch.cat([z, latent], -1)
 
@@ -103,6 +108,8 @@ class ContinuousAffineCoupling(nn.Module):
     def inverse(self, y, t, latent=None, **kwargs):
         mask = self.get_mask(y)
         z = torch.cat([y * mask, t], -1)
+        if self.dim == 1:
+            z = z * 0
         if latent is not None:
             z = torch.cat([z, latent], -1)
 
