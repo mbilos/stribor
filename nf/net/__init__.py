@@ -6,3 +6,4 @@ from .exclusive import *
 from .attention import *
 from .made import *
 from .time_net import *
+from .resnet import *
