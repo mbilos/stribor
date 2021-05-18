@@ -67,9 +67,11 @@ class IResNet(nn.Module):
 # CONTINUOUS INVERTIBLE RESNET
 class ContinuousIResNetBlock(nn.Module):
     def __init__(self, dim, hidden_dims, activation, final_activation, time_net, time_hidden_dim,
-                 coeff, n_power_iterations, **kwargs):
+                 coeff, n_power_iterations, invertible=True, **kwargs):
         super().__init__()
-        wrapper = lambda layer: nf.util.spectral_norm(layer, coeff, n_power_iterations=n_power_iterations)
+        wrapper = None
+        if invertible:
+            wrapper = lambda layer: nf.util.spectral_norm(layer, coeff, n_power_iterations=n_power_iterations)
         self.net = nf.net.MLP(dim + 1, hidden_dims, dim, activation, final_activation, wrapper_func=wrapper)
         self.time_net = getattr(nf.net, time_net)(dim, hidden_dim=time_hidden_dim)
 
@@ -77,6 +79,8 @@ class ContinuousIResNetBlock(nn.Module):
         return x + self.time_net(t) * self.net(torch.cat([x, t], -1))
 
     def inverse(self, y, t, iterations=100):
+        if not self.invertible:
+            raise NotImplementedError
         # fixed-point iteration
         x = y
         for _ in range(iterations):
@@ -86,12 +90,12 @@ class ContinuousIResNetBlock(nn.Module):
 
 class ContinuousIResNet(nn.Module):
     def __init__(self, dim, hidden_dims, num_layers, activation, final_activation, time_net,
-                 time_hidden_dim=None, coeff=0.97, n_power_iterations=5, **kwargs):
+                 time_hidden_dim=None, coeff=0.97, n_power_iterations=5, invertible=True, **kwargs):
         super().__init__()
         blocks = []
         for _ in range(num_layers):
             blocks.append(ContinuousIResNetBlock(dim, hidden_dims, activation, final_activation, time_net,
-                                                 time_hidden_dim, coeff, n_power_iterations))
+                                                 time_hidden_dim, coeff, n_power_iterations, invertible))
         self.blocks = nn.ModuleList(blocks)
 
     def forward(self, x, t):
