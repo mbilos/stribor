@@ -69,7 +69,9 @@ class ContinuousIResNetBlock(nn.Module):
     def __init__(self, dim, hidden_dims, activation, final_activation, time_net, time_hidden_dim,
                  coeff, n_power_iterations, invertible=True, **kwargs):
         super().__init__()
+        self.invertible = invertible
         wrapper = None
+
         if invertible:
             wrapper = lambda layer: nf.util.spectral_norm(layer, coeff, n_power_iterations=n_power_iterations)
         self.net = nf.net.MLP(dim + 1, hidden_dims, dim, activation, final_activation, wrapper_func=wrapper)
