@@ -8,12 +8,9 @@ def build_coupling_flow(dim, hidden_dims, latent_dim, mask, flow_type, num_layer
     base_dist = nf.Normal(torch.zeros(dim), torch.ones(dim))
     transforms = []
     for _ in range(num_layers):
-        lat_dim = hidden_dims[-1]
-        if latent_dim is not None:
-            lat_dim += latent_dim
         transforms.append(nf.Coupling(
-            getattr(nf, flow_type)(dim, latent_dim=lat_dim, n_bins=5),
-            nf.net.MLP(dim, hidden_dims, hidden_dims[-1]),
+            getattr(nf, flow_type)(dim, latent_dim=hidden_dims[-1], n_bins=5),
+            nf.net.MLP(dim + (latent_dim or 0), hidden_dims, hidden_dims[-1]),
             mask
         ))
     return nf.Flow(base_dist, transforms)

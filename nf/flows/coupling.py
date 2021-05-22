@@ -40,9 +40,10 @@ class Coupling(nn.Module):
     def forward(self, x, latent=None, **kwargs):
         mask = self.get_mask(x)
 
-        z = self.net(x * mask)
+        z = x * mask
         if latent is not None:
             z = torch.cat([z, latent], -1)
+        z = self.net(z)
         y, ljd = self.flow.forward(x, latent=z)
 
         y = y * (1 - mask) + x * mask
@@ -52,9 +53,10 @@ class Coupling(nn.Module):
     def inverse(self, y, latent=None, **kwargs):
         mask = self.get_mask(y)
 
-        z = self.net(y * mask)
+        z = y * mask
         if latent is not None:
             z = torch.cat([z, latent], -1)
+        z = self.net(z)
         x, ljd = self.flow.inverse(y, latent=z)
 
         x = x * (1 - mask) + y * mask # [0 | f(y)] + [y | 0]
