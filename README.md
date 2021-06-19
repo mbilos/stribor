@@ -12,9 +12,9 @@ pip install -e .
 ## Generate synthetic 2D data
 
 ```
-python nf/gen/toy.py --N --seed
+python stribor/gen/toy.py --N 10000 --seed 123
 ```
-Default `N=10000` and `seed=123`. Creates 10 datasets in `data/`.
+Creates 10 datasets in `data/`.
 
 ## Run tests
 
@@ -26,9 +26,9 @@ pytest
 
 To define a normalizing flow, define a base distribution and a series of transformations, e.g.:
 ```
-import nf
+import stribor as st
 import torch
-model = nf.Flow(nf.Normal(0, 1), [nf.Identity()])
+model = st.Flow(st.Normal(0, 1), [st.Identity()])
 ```
 ```
 >> model.forward(torch.Tensor([1])) # Returns y and log_jac_diag

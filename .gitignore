@@ -6,3 +6,4 @@ __pycache__
 notebooks/*
 !notebooks/example_spline_coupling.ipynb
 .pytest*
+*.pyc
