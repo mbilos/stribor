@@ -3,6 +3,7 @@ from .affine import *
 from .cnf import *
 from .coupling import *
 from .cumsum import *
+from .identity import *
 from .permute import *
 from .sigmoid import *
 from .spline import *
