@@ -4,7 +4,7 @@ import torch.nn as nn
 class Identity(nn.Module):
     """
     Identity transformation.
-    Doesn't change the input, log-determinant is 0.
+    Doesn't change the input, log-Jacobian is 0.
     """
     def __init__(self, **kwargs):
         super().__init__()

@@ -2,14 +2,24 @@ import torch
 import torch.nn as nn
 
 class MLP(nn.Module):
-    """ Simple multi-layer perceptron.
+    """
+    Simple multi-layer neural network.
+
+    Example:
+    >>> torch.manual_seed(123)
+    >>> net = stribor.net.MLP(2, [64, 64], 1)
+    >>> net(torch.randn(1, 2))
+    tensor([[-0.0132]], grad_fn=<AddmmBackward>)
+
     Args:
-        in_dim: (int) Last dimension of the input tensor
-        hidden_dims: (list) Hidden dimensions of the layers
-        out_dim: (int) Last dimenstion of the output tensor
-        activation: (str) Name of the activation function from `torch.nn`
-        final_activation: (str) Name of the activation function from `torch.nn`
-        wrapper_func: (callable) Wrapper function for `nn.Linear`, e.g. spectral_norm
+        in_dim (int): Input size
+        hidden_dims (List[int]): Hidden dimensions
+        out_dim (int): Output size
+        activation (str, optional): Activation function, name from `torch.nn`.
+            Default: 'Tanh'
+        final_activation (str, optional): Last activation. Default: None
+        wrapper_func (callable, optional): Wrapper function for `nn.Linear`,
+            e.g. st.util.spectral_norm. Default: None
     """
     def __init__(self, in_dim, hidden_dims, out_dim, activation='Tanh',
                  final_activation=None, wrapper_func=None, **kwargs):
@@ -33,5 +43,12 @@ class MLP(nn.Module):
         self.net = nn.Sequential(*layers)
 
     def forward(self, x, **kwargs):
-        """ For input (..., in_dim) returns (..., out_dim) """
+        """
+        Args:
+            x (tensor): Input with shape (..., in_dim)
+
+        Returns:
+            y (tensor): Output with shape (..., out_dim)
+        """
+
         return self.net(x)

@@ -1,47 +1,38 @@
 import torch
 import torch.nn as nn
 
-
-class Identity(nn.Module):
-    """
-    Identity flow.
-    Doesn't change input, determinant is 1.
-    """
-    def __init__(self, **kwargs):
-        super().__init__()
-
-    def forward(self, x, **kwargs):
-        return x, torch.zeros_like(x)
-
-    def inverse(self, y, **kwargs):
-        return y, torch.zeros_like(y)
-
-
 class Affine(nn.Module):
     """
     Affine flow.
     `y = a * x + b`
 
+    Example:
+    >>> torch.manual_seed(123)
+    >>> dim, latent_dim = 2, 50
+    >>> f = stribor.Affine(dim, stribor.net.MLP(latent_dim, [64, 64], 2 * dim))
+    >>> f(torch.ones(1, dim), latent=torch.ones(1, latent_dim))
+    (tensor([[0.7575, 0.9410]], tensor([[-0.1745, -0.1350]])
+
     Args:
-        dim: Distribution domain dimension.
-        latent_dim: Dimension of latent input (Default: None)
+        dim (int): Dimension of data
+        latent_net (Type[nn.Module], optional): Neural network that takes `latent`
+            and outputs transformation parameters of size `[2*dim]`. Default: None
     """
-    def __init__(self, dim, latent_dim=None, **kwargs):
+    def __init__(self, dim, latent_net=None, **kwargs):
         super().__init__()
 
-        if latent_dim is None:
-            bound = 1 / (dim)**0.05
-            self.log_scale = nn.Parameter(torch.Tensor(1, dim).uniform_(-bound, bound))
-            self.shift = nn.Parameter(torch.Tensor(1, dim).uniform_(-bound, bound))
-        else:
-            self.proj = nn.Linear(latent_dim, dim * 2)
-            self.proj.bias.data.fill_(0.0)
+        self.latent_net = latent_net
+
+        if latent_net is None:
+            lim = (3 / dim)**0.5 # Xavier uniform
+            self.log_scale = nn.Parameter(torch.Tensor(1, dim).uniform_(-lim, lim))
+            self.shift = nn.Parameter(torch.Tensor(1, dim).uniform_(-lim, lim))
 
     def get_params(self, latent):
-        if latent is None:
+        if self.latent_net is None:
             return self.log_scale, self.shift
         else:
-            log_scale, shift = self.proj(latent).chunk(2, dim=-1)
+            log_scale, shift = self.latent_net(latent).chunk(2, dim=-1)
             return log_scale, shift
 
     def forward(self, x, latent=None, **kwargs):
@@ -57,43 +48,52 @@ class Affine(nn.Module):
 
 class AffineFixed(nn.Module):
     """
-    Fixed affine flow with predifined unlearnable parameters.
+    Fixed affine transformation with predefined (non-learnable) parameters.
+
+    Example:
+    >>> f = stribor.AffineFixed(torch.tensor([2.]), torch.tensor([3.]))
+    >>> f(torch.tensor([1, 2]))
+    (tensor([5., 7.]), tensor([0.6931, 0.6931]))
+    >>> f.inverse(torch.tensor([5, 7]))
+    (tensor([1., 2.]), tensor([-0.6931, -0.6931]))
 
     Args:
-        shift: List of floats, length equal to data dim.
-        scale: Same as shift, but all values have to be >0.
+        scale (tensor): Scaling factor, all positive values
+        shift (tensor): Shifting factor
     """
     def __init__(self, scale, shift, **kwargs):
         super().__init__()
 
-        self.scale = torch.Tensor(scale)
-        self.shift = torch.Tensor(shift)
+        self.scale = scale
+        self.shift = shift
 
-        assert (self.scale >= 0).all()
+        assert (self.scale > 0).all(), '`scale` mush have positive values'
+
+        self.log_scale = self.scale.log()
 
     def forward(self, x, **kwargs):
         y = self.scale * x + self.shift
-        return y, self.scale.log().expand_as(x)
+        return y, self.log_scale.expand_as(x)
 
     def inverse(self, y, **kwargs):
         x = (y - self.shift) / self.scale
-        return x, -self.scale.log().expand_as(x)
+        return x, -self.log_scale.expand_as(x)
 
 
 class AffinePLU(nn.Module):
     """
-    Affine layer Wx+b where W=PLU correspoding to PLU factorization.
+    Invertible linear layer `Wx+b` where `W=PLU` is PLU factorized.
 
     Args:
         dim: Dimension of input data.
     """
-    def __init__(self, dim, **kwargs):
+    def __init__(self, dim, latent_net=None, **kwargs):
         super().__init__()
 
         self.P = torch.eye(dim)[torch.randperm(dim)]
-        self.weight = nn.Parameter(torch.Tensor(dim, dim))
-        self.log_diag = nn.Parameter(torch.Tensor(1, dim))
-        self.bias = nn.Parameter(torch.Tensor(1, dim))
+        self.weight = nn.Parameter(torch.empty(dim, dim))
+        self.log_diag = nn.Parameter(torch.empty(1, dim))
+        self.bias = nn.Parameter(torch.empty(1, dim))
         nn.init.xavier_uniform_(self.weight)
         nn.init.xavier_uniform_(self.log_diag)
         nn.init.xavier_uniform_(self.bias)
@@ -119,83 +119,42 @@ class AffinePLU(nn.Module):
         return x, ljd
 
 
-class ContinuousAffinePLU(nn.Module):
+class MatrixExponential(nn.Module):
     """
-    Continuous version of `AffinePLU` without P.
-    Weights and biases depend on time.
+    Matrix exponential transformation `y = exp(W*t)x`.
+    Corresponds to a solution of a linear ODE `dx/dt = Wx`.
+
+    Example:
+    >>>
 
     Args:
-        dim: Dimension of input data.
-        time_net: Instance of `st.net.time_net`.
-            Must have output of size `dim^2 + dim`.
+        dim (int): Dimension of data
     """
-    def __init__(self, dim, time_net, **kwargs):
+    def __init__(self, dim, **kwargs):
         super().__init__()
 
-        self.dim = dim
-        self.time_net = time_net
-
-    def get_params(self, t):
-        params = self.time_net(t)
-        b, W = params[...,:self.dim], params[...,self.dim:]
-        W = W.view(*W.shape[:-1], self.dim, self.dim)
-
-        eye = torch.eye(self.dim)
-        log_D = W.diagonal(dim1=-2, dim2=-1)
-        L = torch.tril(W, -1) + eye
-        U = torch.triu(W, 1) + eye * log_D.unsqueeze(-1).exp()
-
-        return L, log_D, U, b
-
-    def forward(self, x, t, **kwargs):
-        """ Input: x (..., dim); t (..., 1) """
-        L, log_D, U, b = self.get_params(t)
-        y = (L @ (U @ x.unsqueeze(-1))).squeeze(-1) + b
-        ljd = log_D.expand_as(x)
-        return y, ljd
-
-    def inverse(self, y, t, **kwargs):
-        L, log_D, U, b = self.get_params(t)
-        y = torch.triangular_solve((y - b).unsqueeze(-1), L, upper=False)[0]
-        x = torch.triangular_solve(y, U, upper=True)[0].squeeze(-1)
-        ljd = -log_D.expand_as(x)
-        return x, ljd
-
-
-class AffineExponential(nn.Module):
-    def __init__(self, dim, bias=True, **kwargs):
-        super().__init__()
-
-        self.weight = nn.Parameter(torch.Tensor(dim, dim))
+        self.weight = nn.Parameter(torch.empty(dim, dim))
         nn.init.xavier_uniform_(self.weight)
-        if bias:
-            self.bias = nn.Parameter(torch.Tensor(1, dim))
-            nn.init.xavier_uniform_(self.bias)
 
-    def get_time(self, t, x):
-        if t is None:
-            t = 1.
-        if isinstance(t, float) or isinstance(t, int):
+    def forward(self, x, t=1., reverse=False, **kwargs):
+        """
+        Args:
+            x (tensor): Input with shape (..., dim)
+            t (tensor or float, optional): Time with shape (..., 1). Default: 1.
+            reverse (bool, optional): Whether to do inverse. Default: False
+        """
+        if reverse:
+            t = -t
+
+        if isinstance(t, float):
             t = torch.ones(*x.shape[:-1], 1) * t
-        return t.unsqueeze(-1)
+        t = t.unsqueeze(-1)
 
-    def forward(self, x, t=None, **kwargs):
-        """ Input: x (..., dim); t (..., 1) """
-        t = self.get_time(t, x)
+        W = torch.matrix_exp(self.weight * t)
+        y = (W @ x.unsqueeze(-1)).squeeze(-1)
 
-        y = (torch.matrix_exp(self.weight * t) @ x.unsqueeze(-1)).squeeze(-1)
-        if hasattr(self, 'bias'):
-            y = y + self.bias * t.squeeze(-1)
-
-        ljd = (self.weight * t).diagonal(dim1=-2, dim2=-1)
+        ljd = (self.weight * t).diagonal(dim1=-2, dim2=-1).expand_as(x)
         return y, ljd
 
-    def inverse(self, y, t=None, **kwargs):
-        t = -self.get_time(t, y)
-
-        if hasattr(self, 'bias'):
-            y = y - self.bias * t.squeeze(-1).abs()
-        x = (torch.matrix_exp(self.weight * t) @ y.unsqueeze(-1)).squeeze(-1)
-
-        ljd = (self.weight * t).diagonal(dim1=-2, dim2=-1)
-        return x, ljd
+    def inverse(self, y, t=1., **kwargs):
+        return self.forward(y, t=t, reverse=True)
