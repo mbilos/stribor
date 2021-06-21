@@ -8,7 +8,9 @@ def build_spline(dim, n_bins, lower, upper, spline_type, latent_dim, num_layers)
     base_dist = st.Normal(torch.zeros(dim), torch.ones(dim))
     transforms = []
     for _ in range(num_layers):
-        transforms.append(st.Spline(dim, n_bins=n_bins, lower=lower, upper=upper, spline_type=spline_type, latent_dim=latent_dim))
+        params_size = dim * (3 * n_bins - 1) if spline_type == 'quadratic' else dim * (2 * n_bins + 2)
+        net = None if latent_dim is None else st.net.MLP(latent_dim, [32], params_size)
+        transforms.append(st.Spline(dim, n_bins=n_bins, lower=lower, upper=upper, spline_type=spline_type, latent_net=net))
     return st.Flow(base_dist, transforms)
 
 @pytest.mark.parametrize('input_shape', [(1, 1), (2, 10), (10, 2), (7, 4, 5)])

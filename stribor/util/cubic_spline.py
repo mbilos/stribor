@@ -3,6 +3,8 @@ import math
 import torch
 from torch.nn import functional as F
 
+# Code taken from https://github.com/bayesiains/nsf
+
 __all__ = ['cubic_spline', 'unconstrained_cubic_spline']
 
 DEFAULT_MIN_BIN_WIDTH = 1e-2
@@ -11,7 +13,7 @@ DEFAULT_EPS = 1e-5
 DEFAULT_QUADRATIC_THRESHOLD = 1e-3
 
 def cbrt(x):
-    """Cube root. Equivalent to torch.pow(x, 1/3), but numerically stable."""
+    """ Cube root. Equivalent to torch.pow(x, 1/3), but numerically stable """
     return torch.sign(x) * torch.exp(torch.log(torch.abs(x)) / 3.0)
 
 def unconstrained_cubic_spline(inputs,

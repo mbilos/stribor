@@ -1,45 +1,50 @@
-# https://github.com/bayesiains/nsf/blob/master/nde/transforms/splines/rational_quadratic.py
-
 import stribor as st
 import torch
 from torch.nn import functional as F
 import numpy as np
 
-__all__ = ['rational_quadratic_spline', 'unconstrained_rational_quadratic_spline']
-
-DEFAULT_MIN_BIN_WIDTH = 1e-3
-DEFAULT_MIN_BIN_HEIGHT = 1e-3
-DEFAULT_MIN_DERIVATIVE = 1e-3
-
+# Code adapted from https://github.com/bayesiains/nsf
 
 def unconstrained_rational_quadratic_spline(inputs,
                                             unnorm_widths,
                                             unnorm_heights,
                                             unnorm_derivatives,
                                             inverse=False,
-                                            lower=-1,
-                                            upper=1,
+                                            lower=-1.,
+                                            upper=1.,
                                             left=None,
                                             right=None,
                                             bottom=None,
                                             top=None,
-                                            tails='linear',
-                                            min_bin_width=DEFAULT_MIN_BIN_WIDTH,
-                                            min_bin_height=DEFAULT_MIN_BIN_HEIGHT,
-                                            min_derivative=DEFAULT_MIN_DERIVATIVE):
+                                            min_bin_width=1e-3,
+                                            min_bin_height=1e-3,
+                                            min_derivative=1e-3):
     """
     Takes inputs and unnormalized parameters for width, height and
     derivatives of spline bins. Normalizes parameters and applies quadratic spline.
+    The domain and codomain can be defined with (lower, upper) or the domain can be
+    defined with (left, right) and codomain with (bottom, top).
 
     Args:
-        inputs: (..., dim)
-        unnorm_widths: (..., dim, n_bins)
-        unnorm_heights: (..., dim, n_bins)
-        unnorm_derivatives: (..., dim, n_bins - 1) or (..., dim, n_bins + 1)
+        inputs (tensor): Input with shape (..., dim)
+        unnorm_widths (tensor): Bin widths (x-axis) with shape (..., dim, n_bins)
+        unnorm_heights (tensor): Bin heights (y-axis) between knots with shape (..., dim, n_bins)
+        unnorm_derivatives (tensor): Derivatives in knots with shape (..., dim, n_bins - 1) or
+            (..., dim, n_bins + 1) (whether derivative in bounds is specified)
+        inverse (bool, optional): Whether to invert the calculation. Default: False
+        lower (float, optional): Lower domain/codomain bound. Default: -1.
+        upper (float, optional): Upper domain/codomain bound. Default: 1.
+        left (float or tensor, optional): Lower domain bound. Default: None
+        right (float or tensor, optional): Upper domain bound. Default: None
+        bottom (float or tensor, optional): Lower codomain bound. Default: None
+        top (float or tensor, optional): Upper codomain bound. Default: None
+        min_bin_width (float, optional): Minimum bin width. Default: 1e-3
+        min_bin_height (float, optional): Minimum bin height. Default: 1e-3
+        min_derivative (float, optional): Minimum knot derivative. Default: 1e-3
 
     Returns:
-        outputs: (..., dim)
-        logabsdet: (..., dim)
+        outputs (tensor): Spline transformed input (..., dim)
+        ljd (tensor): Log-Jacobian diagonal (..., dim)
     """
 
     # Check if all boundaries are defined
@@ -54,7 +59,7 @@ def unconstrained_rational_quadratic_spline(inputs,
         left = bottom = lower
         right = top = upper
 
-    # Inside/outside spline window
+    # Define inside/outside spline window
     unnorm_widths = unnorm_widths.expand(*inputs.shape, -1)
     unnorm_heights = unnorm_heights.expand(*inputs.shape, -1)
     unnorm_derivatives = unnorm_derivatives.expand(*inputs.shape, -1)
@@ -62,26 +67,24 @@ def unconstrained_rational_quadratic_spline(inputs,
     inside_interval = (inputs >= lower) & (inputs <= upper)
     outside_interval = ~inside_interval
 
+    # Define outputs
     outputs = torch.zeros_like(inputs)
-    logabsdet = torch.zeros_like(inputs)
+    ljd = torch.zeros_like(inputs)
 
-    # If edge derivatives not parametrized
+    # If edge derivatives are not parametrized, set to constant
     if unnorm_derivatives.shape[-1] == unnorm_widths.shape[-1] - 1:
         unnorm_derivatives = F.pad(unnorm_derivatives, pad=(1, 1))
         constant = np.log(np.exp(1 - min_derivative) - 1)
         unnorm_derivatives[..., 0] = constant
         unnorm_derivatives[..., -1] = constant
 
-    # Tails
-    if tails == 'linear':
-        outputs[outside_interval] = inputs[outside_interval]
-        logabsdet[outside_interval] = 0
-    else:
-        raise RuntimeError(f'"{tails}" tails are not implemented.')
+    # Define linear tails (outside domain)
+    outputs[outside_interval] = inputs[outside_interval]
+    ljd[outside_interval] = 0
 
-    # If nothing inside interval -> return unchanged
+    # If no points are inside domain -> return unchanged
     if not inside_interval.any():
-        return outputs, logabsdet
+        return outputs, ljd
 
     # Go from unconstrained to actual values
     num_bins = unnorm_widths.shape[-1]
@@ -100,14 +103,14 @@ def unconstrained_rational_quadratic_spline(inputs,
     derivatives = min_derivative + F.softplus(unnorm_derivatives)
 
     # Rational spline
-    outputs, logabsdet = rational_quadratic_spline(
+    outputs, ljd = rational_quadratic_spline(
         inputs=inputs,
         widths=widths,
         heights=heights,
         derivatives=derivatives,
         inside_interval=inside_interval,
         initial_outputs=outputs,
-        initial_logabsdet=logabsdet,
+        initial_ljd=ljd,
         inverse=inverse,
         left=left,
         right=right,
@@ -115,7 +118,7 @@ def unconstrained_rational_quadratic_spline(inputs,
         top=top
     )
 
-    return outputs, logabsdet
+    return outputs, ljd
 
 
 def rational_quadratic_spline(inputs,
@@ -123,39 +126,40 @@ def rational_quadratic_spline(inputs,
                               heights,
                               derivatives,
                               inside_interval,
-                              inverse=False,
-                              initial_outputs=None,
-                              initial_logabsdet=None,
-                              left=None,
-                              right=None,
-                              bottom=None,
-                              top=None):
+                              initial_outputs,
+                              initial_ljd,
+                              left,
+                              right,
+                              bottom,
+                              top,
+                              inverse=False):
     """
     Args:
-        inputs: (..., dim)
-        widths: (..., dim, n_bins)
-        heights: (..., dim, n_bins)
-        derivatives: (..., dim, n_bins + 1)
-        inside_interval: Bool mask, (..., dim)
-        inverse: Whether to do inverse calculation
-        initial_outputs: Can be initialized to zero, or same as inputs, (..., dim)
-        initial_logabsdet: Same as initial_outputs
-        left: Left boundary, either (float) or (tensor) with same shape as inputs
-        right: Right boundary, same type as left boundary
-        bottom: Bottom boundary, same type as left boundary
-        top: Top boundary, same type as left boundary
-    Outputs:
+        inputs (tensor): Input with shape (..., dim)
+        widths (tensor): Bin widths with shape (..., dim, n_bins)
+        heights (tensor): Bin heights with shape (..., dim, n_bins)
+        derivatives (tensor): Derivatives with shape (..., dim, n_bins + 1)
+        inside_interval (tensor): Boolean mask, (..., dim)
+        initial_outputs: Initial input, usually initialized to zero with shape (..., dim)
+        initial_ljd: Same as initial_outputs
+        left (float or tensor): Left boundary, if tensor, has shape (..., dim)
+        right (float or tensor): Right boundary, same type as left boundary
+        bottom (float or tensor): Bottom boundary, same type as left boundary
+        top (float or tensor): Top boundary, same type as left boundary
+        inverse (bool, optional): Whether to do inverse calculation. Default: False
+
+    Returns:
         outputs: (..., dim)
-        logabsdet: (..., dim)
+        ljd: (..., dim)
     """
 
-    # Take only inside interval
+    # Take only values inside interval
     inputs = inputs[inside_interval]
     widths = widths[inside_interval, :]
     heights = heights[inside_interval, :]
     derivatives = derivatives[inside_interval, :]
 
-    # If boundaries not tensor, convert to one
+    # If boundaries are not tensors, convert them to tensors
     def boundary_to_tensor(b):
         return b[inside_interval].unsqueeze(-1) if torch.is_tensor(b) else torch.ones(inputs.shape[0], 1) * b
     left = boundary_to_tensor(left)
@@ -163,6 +167,7 @@ def rational_quadratic_spline(inputs,
     top = boundary_to_tensor(top)
     bottom = boundary_to_tensor(bottom)
 
+    # Check if values fall out of domain
     if inverse and ((inputs < bottom).any() or (inputs > top).any()):
         raise ValueError('Inverse input is outside of domain')
     elif not inverse and ((inputs < left).any() or (inputs > right).any()):
@@ -222,7 +227,7 @@ def rational_quadratic_spline(inputs,
         derivative_numerator = input_delta.pow(2) * (input_derivatives_plus_one * root.pow(2)
                                                      + 2 * input_delta * theta_one_minus_theta
                                                      + input_derivatives * (1 - root).pow(2))
-        logabsdet = -torch.log(derivative_numerator) + 2 * torch.log(denominator) # Note the sign change
+        ljd = -torch.log(derivative_numerator) + 2 * torch.log(denominator) # Note the sign change
     else:
         theta = (inputs - input_cumwidths) / input_bin_widths
         theta_one_minus_theta = theta * (1 - theta)
@@ -236,7 +241,7 @@ def rational_quadratic_spline(inputs,
         derivative_numerator = input_delta.pow(2) * (input_derivatives_plus_one * theta.pow(2)
                                                      + 2 * input_delta * theta_one_minus_theta
                                                      + input_derivatives * (1 - theta).pow(2))
-        logabsdet = torch.log(derivative_numerator) - 2 * torch.log(denominator)
+        ljd = torch.log(derivative_numerator) - 2 * torch.log(denominator)
 
-    initial_outputs[inside_interval], initial_logabsdet[inside_interval] = outputs, logabsdet
-    return initial_outputs, initial_logabsdet
+    initial_outputs[inside_interval], initial_ljd[inside_interval] = outputs, ljd
+    return initial_outputs, initial_ljd
