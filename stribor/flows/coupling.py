@@ -6,27 +6,33 @@ import torch.nn.functional as F
 
 class Coupling(nn.Module):
     """
-    Coupling layer.
-    Splits data into 2 parts based on mask. One part generates
-    parameters of the flow that will transform the rest.
-    Efficient (identical) computation in both directions.
-
-    Args:
-        flow: Elementwise flow, should have `latent_dim` the same size as `net` output.
-        net: Instance of `st.net`.
-        mask: Mask name, e.g. 'ordered_right_half', see `st.util.mask` for other options.
-        set_data: If data is in (..., N, dim) form.
+    Coupling transformation via elementwise flows. If `dim = 1`, set `mask = 'none'`.
+    Splits data into 2 parts based on a mask. One part generates parameters of the flow
+    that will transform the rest. Efficient (identical) computation in both directions.
 
     Example:
-    >> x = torch.rand(64, 2)
-    >> f = st.Coupling(st.Affine(2, latent_dim=32), st.net.MLP(2, [64], 32), mask='ordered_right_half')
-    >> y, ljd = f(x) # returns output and log Jacobian diagonal, both with shapes (64, 2)
+    >>> import stribor as st
+    >>> torch.manual_seed(123)
+    >>> dim, n_bins, latent_dim = 2, 5, 50
+    >>> f = st.Coupling(st.Affine(dim, st.net.MLP(dim + latent_dim, [64], 2 * dim)), mask='ordered_left_half')
+    >>> f(torch.randn(1, 2), latent=torch.randn(1, latent_dim))
+    tensor([[ 0.4974, -1.6288]], tensor([[0.0000, 0.3708]]
+    >>> f = st.Coupling(st.Spline(dim, n_bins, st.net.MLP(dim, [64], dim * (3 * n_bins - 1))), mask='random_half')
+    >>> f(torch.rand(1, dim))
+    tensor([[0.9165, 0.7125]], tensor([[0.6281, -0.0000]]
+
+    Args:
+        flow (Type[stribor.flows]): Elementwise flow with `latent_net` property.
+            Latent network takes input of size `dim` and returns the parameters of the flow.
+        mask (str): Mask name from `stribor.util.mask`. Options: `none`,
+            `ordered_right_half` (right transforms left), `ordered_left_half`, `random_half`,
+            `parity_even` (even indices transform odd), `parity_odd`.
+        set_data (bool, optional): Whether data has shape (..., N, dim). Default: False
     """
-    def __init__(self, flow, net, mask, set_data=False, **kwargs):
+    def __init__(self, flow, mask, set_data=False, **kwargs):
         super().__init__()
 
         self.flow = flow
-        self.net = net
         self.mask_func = st.util.mask.get_mask(mask) # Initializes mask generator
         self.set_data = set_data
 
@@ -37,89 +43,88 @@ class Coupling(nn.Module):
         else:
             return self.mask_func(x.shape[-1]).expand_as(x).to(x)
 
-    def forward(self, x, latent=None, **kwargs):
+    def forward(self, x, latent=None, reverse=False, **kwargs):
         mask = self.get_mask(x)
 
         z = x * mask
+        if x.shape[-1] == 1:
+            z = z * 0
         if latent is not None:
             z = torch.cat([z, latent], -1)
-        z = self.net(z)
-        y, ljd = self.flow.forward(x, latent=z)
+
+        if reverse:
+            y, ljd = self.flow.inverse(x, latent=z, **kwargs)
+        else:
+            y, ljd = self.flow.forward(x, latent=z, **kwargs)
 
         y = y * (1 - mask) + x * mask
         ljd = ljd * (1 - mask)
         return y, ljd
 
     def inverse(self, y, latent=None, **kwargs):
-        mask = self.get_mask(y)
-
-        z = y * mask
-        if latent is not None:
-            z = torch.cat([z, latent], -1)
-        z = self.net(z)
-        x, ljd = self.flow.inverse(y, latent=z)
-
-        x = x * (1 - mask) + y * mask # [0 | f(y)] + [y | 0]
-        ljd = ljd * (1 - mask)
-        return x, ljd
+        return self.forward(y, latent=latent, reverse=True, **kwargs)
 
 
 class ContinuousAffineCoupling(nn.Module):
     """
-    Continuous affine coupling layer.
-    Similar to `Coupling` but only applies affine transformation
-    which now depends on time `t`.
+    Continuous affine coupling layer. If `dim = 1`, set `mask = 'none'`.
+    Similar to `Coupling` but applies only an affine transformation
+    which here depends on time `t` such that it's identity map at `t = 0`.
+
+    Example:
+    >>> import stribor as st
+    >>> torch.manual_seed(123)
+    >>> dim = 2
+    >>> f = st.ContinuousAffineCoupling(st.net.MLP(dim+1, [64], 2 * dim), st.net.TimeLinear(2 * dim), 'parity_odd')
+    >>> f(torch.rand(1, 2), t=torch.rand(1, 1))
+    (tensor([[0.8188, 0.4037]], tensor([[-0.0000, -0.1784]])
 
     Args:
-        net: Instance of `st.net`. Output dim must be `2 * dim`.
-        time_net: Instance of `st.net.time_net`. Same output dim as `net`.
-        mask: Mask name, e.g. 'ordered_right_half', see `st.util.mask` for other options.
+        latent_net (Type[nn.Module]): Inputs concatenation of `x` and `t` (and optionally
+            `latent`) and outputs affine transformation parameters (size `2 * dim`)
+        time_net (Type[stribor.net.time_net]): Time embedding with the same output
+            size as `latent_net`
+        mask (str): Mask name from `stribor.util.mask`
     """
-    def __init__(self, dim, net, time_net, mask, **kwargs):
+    def __init__(self, latent_net, time_net, mask, **kwargs):
         super().__init__()
 
-        self.dim = dim
-        if dim == 1 and mask != 'none':
-            raise ValueError('When dim=1, mask has to be `none`')
-        self.net = net
+        self.latent_net = latent_net
         self.mask_func = st.util.mask.get_mask(mask) # Initializes mask generator
         self.time_net = time_net
 
     def get_mask(self, x):
         return self.mask_func(x.shape[-1]).expand_as(x).to(x)
 
-    def forward(self, x, t, latent=None, **kwargs):
-        """ Input: x (..., dim), t (..., 1) """
+    def forward(self, x, t, latent=None, reverse=False, **kwargs):
+        """
+        Args:
+            x (tensor): Input with shape (..., dim)
+            t (tensor): Time input with shape (..., 1)
+            latent (tensor): Conditioning vector with shape (..., latent_dim)
+            reverse (bool, optional): Whether to calculate inverse. Default: False
+
+        Returns:
+            y (tensor): Transformed input with shape (..., dim)
+            ljd (tensor): Log-Jacobian diagonal with shape (..., dim)
+        """
         mask = self.get_mask(x)
-        z = torch.cat([x * mask, t], -1)
-        if self.dim == 1:
-            z = z * 0
+        z = torch.cat([x * 0 if x.shape[-1] == 1 else x * mask, t], -1)
         if latent is not None:
             z = torch.cat([z, latent], -1)
 
-        scale, shift = self.net(z).chunk(2, dim=-1)
+        scale, shift = self.latent_net(z).chunk(2, dim=-1)
         t_scale, t_shift = self.time_net(t).chunk(2, dim=-1)
 
-        y = x * torch.exp(scale * t_scale) + shift * t_shift
-
+        if reverse:
+            y = (x - shift * t_shift) * torch.exp(-scale * t_scale)
+            ljd = -scale * t_scale * (1 - mask)
+        else:
+            y = x * torch.exp(scale * t_scale) + shift * t_shift
+            ljd = scale * t_scale * (1 - mask)
         y = y * (1 - mask) + x * mask
-        ljd = scale * t_scale * (1 - mask)
 
         return y, ljd
 
     def inverse(self, y, t, latent=None, **kwargs):
-        mask = self.get_mask(y)
-        z = torch.cat([y * mask, t], -1)
-        if self.dim == 1:
-            z = z * 0
-        if latent is not None:
-            z = torch.cat([z, latent], -1)
-
-        scale, shift = self.net(z).chunk(2, dim=-1)
-        t_scale, t_shift = self.time_net(t).chunk(2, dim=-1)
-
-        x = (y - shift * t_shift) * torch.exp(-scale * t_scale)
-        x = x * (1 - mask) + y * mask
-        ljd = -scale * t_scale * (1 - mask)
-
-        return x, ljd
+        return self.forward(y, t=t, latent=latent, reverse=True)
