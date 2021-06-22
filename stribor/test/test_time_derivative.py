@@ -6,7 +6,7 @@ import stribor as st
 
 @pytest.mark.parametrize('input_dim', [(1, 1), (2, 3, 1)])
 @pytest.mark.parametrize('output_dim', [1, 5])
-@pytest.mark.parametrize('function', ['TimeIdentity', 'TimeLinear', 'TimeTanh', 'TimeLog', 'TimeFourier'])
+@pytest.mark.parametrize('function', ['TimeIdentity', 'TimeLinear', 'TimeTanh', 'TimeLog', 'TimeFourier', 'TimeFourierBounded'])
 def test_time_derivative(input_dim, output_dim, function):
     f = getattr(st.net.time_net, function)(output_dim, hidden_dim=8)
 

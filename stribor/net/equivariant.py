@@ -45,7 +45,7 @@ class EquivariantNet(nn.Module):
         in_dim (int): Input size
         hidden_dims (List[int]): Hidden dimensions
         out_dim (int): Output size
-        activation (str, optional): Activation function, name from `torch.nn`. Default: 'Tanh'
+        activation (str, optional): Activation function from `torch.nn`. Default: 'Tanh'
         final_activation (str, optional): Last activation. Default: None
     """
     def __init__(self, in_dim, hidden_dims, out_dim, activation='Tanh', final_activation=None, **kwargs):

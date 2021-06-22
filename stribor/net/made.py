@@ -1,6 +1,7 @@
 # Implements Masked AutoEncoder for Density Estimation, by Germain et al. 2015
 # Re-implementation by Andrej Karpathy based on https://arxiv.org/abs/1502.03509
 
+import stribor as st
 import numpy as np
 import torch
 import torch.nn as nn
@@ -21,45 +22,52 @@ class MaskedLinear(nn.Linear):
         return F.linear(input, self.mask * self.weight, self.bias)
 
 class MADE(nn.Module):
+    """
+    Autoregressive transformation with a neural network, implemented using weight masking.
+    "MADE: Masked Autoencoder for Distribution Estimation" (https://arxiv.org/abs/1502.03509)
+
+    Args:
+        in_dim (int): Input size
+        hidden_dims (List[int]): Hidden dimensions
+        out_dim (int): Output size. Has to be multiple of `in_dim` such that each dimension
+            has assigned output dimensions. `return_per_dim` governs how the output looks like
+        activation (str, optional): Activation function from `torch.nn`. Default: 'Tanh'
+        final_activation (str, optional): Last activation. Default: None
+        num_masks (int, optional): Number of ordering ensembles. Default: 1
+        natural_ordering (bool, optional): Whether to use natural ordering of dimensions,
+            otherwise uses random permutations. Default: False
+        return_per_dim: Whether to return in (..., in_dim, out_dim / in_dim) format,
+            otherwise returns (..., out_dim). Default: False
+    """
     def __init__(self, in_dim, hidden_dims, out_dim, activation='Tanh', final_activation=None,
                  num_masks=1, natural_ordering=False, reverse_ordering=False, return_per_dim=False, **kwargs):
-        """
-        out_dim: integer; Number of outputs, which usually collectively parameterize some kind of 1D distribution
-              note: if out_dim is e.g. 2x larger than in_dim (perhaps the mean and std), then the first in_dim
-              will be all the means and the second in_dim will be stds. i.e. output dimensions depend on the
-              same input dimensions in "chunks" and should be carefully decoded downstream appropriately.
-              the output of runin_dimg the tests for this file makes this a bit more clear with examples.
-        num_masks: Can be used to train ensemble over orderings/connections
-        natural_ordering: Force natural ordering of dimensions, don't use random permutations
-        return_per_dim: Whether to return in (..., in_dim, out_dim / in_dim) format, with correct assignment
-        """
         super().__init__()
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.hidden_dims = hidden_dims
+        self.activation = activation
+        self.final_activation = final_activation
         self.return_per_dim = return_per_dim
-        assert self.out_dim % self.in_dim == 0, "out_dim must be integer multiple of in_dim"
-
-        # define a simple MLP neural net
-        self.net = []
-        hs = [in_dim] + self.hidden_dims + [out_dim]
-        for h0, h1 in zip(hs, hs[1:]):
-            self.net.append(MaskedLinear(h0, h1))
-            self.net.append(getattr(nn, activation)())
-        self.net.pop() # pop the last activation for the output layer
-        if final_activation is not None:
-            self.net.append(getattr(nn, final_activation)())
-
-        self.net = nn.Sequential(*self.net)
-
-        # seeds for orders/connectivities of the model ensemble
         self.natural_ordering = natural_ordering
         self.reverse_ordering = reverse_ordering
         self.num_masks = num_masks
-        self.seed = 0 # for cycling through num_masks orderings
+        assert self.out_dim % self.in_dim == 0, "out_dim must be integer multiple of in_dim"
+
+        self.net = self._get_net()
 
         self.m = {}
         self.update_masks() # builds the initial self.m connectivity
+
+    def _get_net(self):
+        net = []
+        hs = [self.in_dim] + self.hidden_dims + [self.out_dim]
+        for h0, h1 in zip(hs, hs[1:]):
+            net.append(MaskedLinear(h0, h1))
+            net.append(getattr(nn, self.activation)())
+        net.pop() # pop the last activation for the output layer
+        if self.final_activation is not None:
+            net.append(getattr(nn, self.final_activation)())
+        return nn.Sequential(*net)
 
     def update_masks(self):
         if self.m and self.num_masks == 1:
@@ -67,9 +75,7 @@ class MADE(nn.Module):
 
         L = len(self.hidden_dims)
 
-        # fetch the next seed and construct a random stream
-        rng = np.random.RandomState(self.seed)
-        self.seed = (self.seed + 1) % self.num_masks
+        rng = np.random.RandomState()
 
         # sample the order of the inputs and the connectivity of all neurons
         if self.natural_ordering:
@@ -98,6 +104,14 @@ class MADE(nn.Module):
             l.set_mask(m)
 
     def forward(self, x, **kwargs):
+        """
+        Args:
+            x (tensor): Input with shape (..., in_dim)
+
+        Returns:
+            y (tensor): Output with shape (..., in_dim, out_dim / in_dim)
+                if `return_per_dim=True`, else (..., out_dim)
+        """
         original_shape = x.shape
 
         x = x.view(-1, original_shape[-1])

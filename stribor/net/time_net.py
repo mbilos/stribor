@@ -71,15 +71,11 @@ class TimeFourier(nn.Module):
         scale = self.get_scale()
         t = scale * torch.sin(self.shift * t)
         t = t.sum(-1)
-        if self.bounded:
-            t += 0.5
         return t
 
     def derivative(self, t):
         t = t.unsqueeze(-1)
         scale = self.get_scale()
-        if self.bounded:
-            raise NotImplementedError
         t = self.shift * scale * torch.cos(self.shift * t)
         t = t.sum(-1)
         return t

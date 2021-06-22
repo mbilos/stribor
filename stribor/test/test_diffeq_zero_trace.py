@@ -24,11 +24,12 @@ def test_mlp_zero_trace(dim, latent_dim):
 
 @pytest.mark.parametrize('dim', [2, 3, 11])
 @pytest.mark.parametrize('latent_dim', [1, 3, 8])
-def test_deepset_zero_trace(dim, latent_dim):
+@pytest.mark.parametrize('pooling', ['max', 'sum', 'mean'])
+def test_deepset_zero_trace(dim, latent_dim, pooling):
     torch.manual_seed(123)
 
     out_dim = dim * latent_dim
-    model = st.net.DiffeqZeroTraceDeepSet(dim, [64, 64], out_dim, pooling='max')
+    model = st.net.DiffeqZeroTraceDeepSet(dim, [64, 64], out_dim, pooling=pooling)
 
     t = torch.Tensor([1])
     x = torch.randn(5, 10, dim)

@@ -4,8 +4,9 @@ import torch
 import torch.nn as nn
 
 class ModelExact(nn.Module):
-    """ The same forward function as defined in FuncAndDiagJac
-        but without detaching and without custom gradients.
+    """
+    The same forward function as defined in `stribor.net.FuncAndDiagJac`
+    but without detaching and without custom gradients.
     """
     def __init__(self, exclusive_net, dimwise_net):
         super().__init__()
@@ -66,7 +67,7 @@ def check_if_model_is_implemented_correctly(input_shape, model, latent_dim):
     assert all([torch.isclose(g1.grad, g2.grad).all() for g1, g2 in zip(model.parameters(), model_exact.parameters())]), \
         'Gradients for two networks are not the same'
 
-@pytest.mark.parametrize('input_shape', [(10, 2), (1, 1, 3), (3, 7, 2), (2, 3, 5, 2)])
+@pytest.mark.parametrize('input_shape', [(10, 2), (1, 1, 3), (3, 7, 8), (2, 3, 5, 2)])
 @pytest.mark.parametrize('hidden_dims', [[], [64, 32]])
 @pytest.mark.parametrize('d_h', [1, 2, 5])
 @pytest.mark.parametrize('latent_dim', [0, 1, 32])
@@ -100,45 +101,46 @@ def test_diffeq_exact_trace_attention(input_shape, hidden_dims, d_h, latent_dim,
     check_if_model_is_implemented_correctly(input_shape, model, latent_dim)
 
 
-@pytest.mark.parametrize('input_shape', [(1, 2, 8), (3, 7, 2), (2, 3, 5, 2)])
+@pytest.mark.parametrize('input_shape', [(1, 2, 8), (3, 7, 2), (2, 3, 5, 2), (3, 16)])
 @pytest.mark.parametrize('hidden_dims', [[32, 64]])
 @pytest.mark.parametrize('d_h', [1, 3, 7])
-@pytest.mark.parametrize('latent_dim', [1])
+@pytest.mark.parametrize('latent_dim', [0])
 def test_backpropagation_through_encoder(input_shape, hidden_dims, d_h, latent_dim):
     class Model(nn.Module):
-        def __init__(self, flow):
+        def __init__(self, diffeq):
             super().__init__()
-            self.flow = flow
+            self.diffeq = diffeq
             self.encoder = st.net.MLP(input_shape[-1], [17], latent_dim)
 
         def forward(self, t, x):
-            latent = self.encoder(x)
-            y = self.flow(t, x, latent=latent)
+            latent = self.encoder(torch.ones(input_shape)).requires_grad_(True)
+            y = self.diffeq(t, x, latent=latent)
             return y
 
     torch.manual_seed(123)
     t = torch.Tensor([1])
-    x = torch.randn(input_shape)
-    flow = st.net.DiffeqExactTraceMLP(input_shape[-1], hidden_dims, input_shape[-1], d_h,
-                                        latent_dim=latent_dim, return_log_det_jac=False)
-    model = Model(flow)
+    x = torch.randn(*input_shape)
+    diffeq = st.net.DiffeqExactTraceMLP(input_shape[-1], hidden_dims, input_shape[-1], d_h,
+                                      latent_dim=latent_dim, return_log_det_jac=False)
+    model = Model(diffeq)
     y = model(t, x)
     loss = y.mean()
     loss.backward()
 
     torch.manual_seed(123)
-    t = torch.Tensor([1])
-    x_ = torch.randn(input_shape)
-    flow_exact = st.net.DiffeqExactTraceMLP(input_shape[-1], hidden_dims, input_shape[-1], d_h,
+    t_ = torch.ones(1).requires_grad_(True)
+    x_ = torch.randn(*input_shape).requires_grad_(True)
+    diffeq_exact = st.net.DiffeqExactTraceMLP(input_shape[-1], hidden_dims, input_shape[-1], d_h,
                                             latent_dim=latent_dim, return_log_det_jac=False)
-    model_exact = Model(ModelExact(flow_exact.exclusive_net, flow_exact.dimwise_net))
-    y_exact = model_exact(t, x_)
+    diffeq_exact = ModelExact(diffeq.exclusive_net, diffeq.dimwise_net)
+    model_exact = Model(diffeq_exact)
+    y_exact = model_exact(t_, x_)
     loss_exact = y_exact.mean()
     loss_exact.backward()
 
-    assert (y == y_exact).all(), 'Outputs are not the same'
+    assert torch.isclose(y, y_exact).all(), 'Outputs are not the same'
 
-    # Check if losses for both models are exactly the same
+    # Check if gradients for both models are exactly the same
     for (n1, g1), (n2, g2) in zip(model.named_parameters(), model_exact.named_parameters()):
         assert n1 == n2, 'Names are not the same'
         assert (g1.data == g2.data).all(), 'Parameter values are not the same'

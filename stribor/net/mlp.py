@@ -15,7 +15,7 @@ class MLP(nn.Module):
         in_dim (int): Input size
         hidden_dims (List[int]): Hidden dimensions
         out_dim (int): Output size
-        activation (str, optional): Activation function, name from `torch.nn`.
+        activation (str, optional): Activation function from `torch.nn`.
             Default: 'Tanh'
         final_activation (str, optional): Last activation. Default: None
         wrapper_func (callable, optional): Wrapper function for `nn.Linear`,
