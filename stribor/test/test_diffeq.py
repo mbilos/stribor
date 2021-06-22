@@ -16,7 +16,7 @@ def test_cnf_computation(input_shape, latent_dim):
 
     dim = x.shape[-1]
     in_dim = dim if latent_dim is None else dim + latent_dim
-    transforms = [st.ContinuousFlow(dim, net=st.net.DiffeqMLP(in_dim + 1, [32], dim), atol=1e-8, rtol=1e-8,
+    transforms = [st.ContinuousNormalizingFlow(dim, net=st.net.DiffeqMLP(in_dim + 1, [32], dim), atol=1e-8, rtol=1e-8,
                   divergence='compute', solver='dopri5', has_latent=latent is not None)]
     model = st.Flow(st.Normal(torch.zeros(dim), torch.ones(dim)), transforms)
 
@@ -44,7 +44,7 @@ def test_cnf_definition(input_shape, latent_dim, diffeq, hidden_dims, solver, so
 
     dim = x.shape[-1]
     in_dim = dim if latent_dim is None else dim + latent_dim
-    cnf = st.ContinuousFlow(dim,
+    cnf = st.ContinuousNormalizingFlow(dim,
                             net=getattr(st.net, diffeq)(in_dim + 1, hidden_dims, dim),
                             solver=solver,
                             solver_options=solver_options,
@@ -59,7 +59,7 @@ def test_diffeq_equivariant(input_shape, odenet):
     torch.manual_seed(123)
 
     dim = input_shape[-1]
-    cnf = st.ContinuousFlow(dim, net=getattr(st.net, odenet)(dim + 1, [32], dim), atol=1e-8, rtol=1e-8,
+    cnf = st.ContinuousNormalizingFlow(dim, net=getattr(st.net, odenet)(dim + 1, [32], dim), atol=1e-8, rtol=1e-8,
                             divergence='compute', solver='dopri5')
     model = st.Flow(st.UnitNormal(dim), [cnf])
 

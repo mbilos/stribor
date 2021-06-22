@@ -1,6 +1,3 @@
-# Continous normalizing flow https://arxiv.org/abs/1810.01367
-# Code adapted from https://github.com/rtqichen/ffjord
-
 import stribor as st
 import numpy as np
 import torch
@@ -8,10 +5,25 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchdiffeq import odeint_adjoint, odeint
 
-__all__ = ['ContinuousFlow']
+__all__ = ['ContinuousNormalizingFlow']
 
+# Code adapted from https://github.com/rtqichen/ffjord
 
 class ODEfunc(nn.Module):
+    """
+    ODE function used in continuous normalizing flows.
+    "FFJORD: Free-form Continuous Dynamics for Scalable Reversible Generative Models"
+    (https://arxiv.org/abs/1810.01367)
+
+    Args:
+        diffeq (Type[nn.Module]): Given inputs `x` and `t`, returns `dx` (and optionally trace)
+        divergence (str): How to calculate divergence.
+            Options: 'compute', 'compute_set', 'approximate', 'exact'
+        rademacher (bool, optional): Whether to use Rademacher distribution for stochastic
+            estimator, otherwise uses normal distribution. Default: False
+        has_latent (bool, optional): Whether we have latent inputs. Default: False
+        set_data (bool, optional): Whether we have set data with shape (..., N, dim). Default: False
+    """
     def __init__(self, diffeq, divergence=None, rademacher=False, has_latent=False, set_data=False, **kwargs):
         super().__init__()
         assert divergence in ['compute', 'compute_set', 'approximate', 'exact']
@@ -71,29 +83,64 @@ class ODEfunc(nn.Module):
         return (dy, -divergence) + tuple(torch.zeros_like(x) for x in states[2:])
 
 
-class ContinuousFlow(nn.Module):
-    def __init__(self, dim, net=None, T=1.0, divergence='approximate', use_adjoint=True, has_latent=False,
-                 solver='dopri5', solver_options={}, test_solver=None, test_solver_options=None, set_data=False,
-                 rademacher=False, atol=1e-5, rtol=1e-3, **kwargs):
-        """
-        Continuous normalizing flow.
+class ContinuousNormalizingFlow(nn.Module):
+    """
+    Continuous normalizing flow.
+    "Neural Ordinary Differential Equations" (https://arxiv.org/abs/1806.07366)
 
-        Args:
-            dim: Input data dimension
-            net: Neural net that defines a differential equation, instance of `net`
-            T: Integrate from 0 until T (Default: 1.0)
-            divergence: How to obtain divergence; ['approximate', 'compute', 'compute_set', 'exact']
-            use_adjoint: Whether to use adjoint method for backpropagation
-            solver: ODE black-box solver, adaptive: dopri5, dopri8, bosh3, adaptive_heun;
-                exact-step: euler, midpoint, rk4, explicit_adams, implicit_adams
-            solver_options: Additional options, e.g. {'step_size': 10}
-            test_solver: Same as solver, used during evaluation
-            test_solver_options: Same as solver_options, used during evaluation
-            set_data: If data is of shape (..., N, D)
-            rademacher: Whether to use rademacher sampling (Default: False)
-            atol: Tolerance (Default: 1e-5)
-            rtol: Tolerance (Default: 1e-3)
-        """
+    Example:
+    >>> torch.manual_seed(123)
+    >>> dim = 2
+    >>> f = stribor.ContinuousNormalizingFlow(dim, net=stribor.net.DiffeqMLP(dim + 1, [64], dim))
+    >>> f(torch.randn(1, dim))
+    (tensor([[-0.1527, -0.4164]], tensor([[-0.1218, -0.7133]])
+
+    Args:
+        dim (int): Input data dimension
+        net (Type[nn.Module]): Neural net that defines a differential equation.
+            It takes `x` and `t` and returns `dx` (and optionally trace).
+        T (float): Upper bound of integration. Default: 1.0
+        divergence: How to calculate divergence. Options:
+            `compute`: Brute force approach, scales with O(d^2)
+            `compute_set`: Same as compute but for densities over sets with shape (..., N, dim)
+            `approximate`: Stochastic estimator, only used during training, O(d)
+            `exact`: Exact trace, returned from the `net`
+            Default: 'approximate'
+        use_adjoint (bool, optional): Whether to use adjoint method for backpropagation,
+            which is more memory efficient. Default: True
+        solver (string): ODE black-box solver.
+            adaptive: `dopri5`, `dopri8`, `bosh3`, `adaptive_heun`
+            exact-step: `euler`, `midpoint`, `rk4`, `explicit_adams`, `implicit_adams`
+            Default: 'dopri5'
+        solver_options (dict, optional): Additional options, e.g. `{'step_size': 10}`. Default: {}
+        test_solver (str, optional): Which solver to use during evaluation. If not specified,
+            uses the same as during training. Default: None
+        test_solver_options (dict, optional): Which solver options to use during evaluation.
+            If not specified, uses the same as during training. Default: None
+        set_data (bool, optional): If data is of shape (..., N, D). Default: False
+        rademacher (bool, optional): Whether to use Rademacher distribution for stochastic
+            estimator, otherwise uses normal distribution. Default: False
+        atol (float): Absolute tolerance (Default: 1e-5)
+        rtol (float): Relative tolerance (Default: 1e-3)
+    """
+    def __init__(
+        self,
+        dim,
+        net=None,
+        T=1.0,
+        divergence='approximate',
+        use_adjoint=True,
+        has_latent=False,
+        solver='dopri5',
+        solver_options={},
+        test_solver=None,
+        test_solver_options=None,
+        set_data=False,
+        rademacher=False,
+        atol=1e-5,
+        rtol=1e-3,
+        **kwargs
+    ):
         super().__init__()
 
         self.T = T
