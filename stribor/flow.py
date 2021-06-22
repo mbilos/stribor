@@ -4,23 +4,21 @@ import torch.nn.functional as F
 import torch.distributions as td
 
 class Flow(nn.Module):
-    """ Normalizing or Neural Flow.
+    """
+    Building both normalizing flows and neural flows.
+
+    Example:
+    >>> import stribor as st
+    >>> torch.manual_seed(123)
+    >>> dim = 2
+    >>> flow = st.Flow(st.UnitNormal(dim), [st.Affine(dim)])
+    >>> x = torch.rand(1, dim)
+    >>> y, ljd = flow(x)
+    >>> y_inv, ljd_inv = flow.inverse(y)
 
     Args:
-        base_dist: Instance of torch.distributions
-        transforms: List of transformations from `st.flows`
-
-    Example (identity flow):
-    >> flow = st.Flow()
-
-    Example (normal distribution):
-    >> flow = st.Flow(st.Normal(0, 1), [st.Identity()])
-    >> flow.forward(torch.Tensor([1])) # Returns y and log diagonal jacobian
-    (tensor([1.]), tensor([0.]))
-    >> flow.log_prob(torch.Tensor([1])) # Returns log probability
-    tensor([[-1.4189]])
-    >> flow.sample(5) # Output will differ every time
-    tensor([0.1695, 1.9026, 0.4640, 0.7100, 0.2773])
+        base_dist (Type[torch.distributions]): Base distribution
+        transforms (List[st.flows]): List of invertible transformations
     """
     def __init__(self, base_dist=None, transforms=[]):
         super().__init__()
@@ -30,14 +28,17 @@ class Flow(nn.Module):
     def forward(self, x, latent=None, mask=None, t=None, reverse=False, **kwargs):
         """
         Args:
-            x: Input from base density (..., dim)
-            latent: Conditional vector, same shape as y
-            mask: Tenstor of 0 and 1, same shape as y
-            reverse: Whether to use the inverse function
+            x (tensor): Input sampled from base density with shape (..., dim)
+            latent (tensor, optional): Conditional vector with shape (..., latent_dim)
+                Default: None
+            mask (tensor): Masking tensor with shape (..., 1)
+                Default: None
+            t (tensor, optional): Flow time end point. Default: None
+            reverse (bool, optional): Whether to perform an inverse. Default: False
 
         Returns:
-            y: Output in target density (..., dim)
-            log_jac_diag: Diagonal logarithm of Jacobian (..., dim)
+            y (tensor): Output that follows target density (..., dim)
+            log_jac_diag (tensor): Log-Jacobian diagonal (..., dim)
         """
         transforms = self.transforms[::-1] if reverse else self.transforms
         _mask = 1 if mask is None else mask
@@ -56,27 +57,32 @@ class Flow(nn.Module):
         return self.forward(y, latent=latent, mask=mask, t=t, reverse=True, **kwargs)
 
     def log_prob(self, x, **kwargs):
-        """ Calculates log-probability of a sample.
+        """
+        Calculates log-probability of a sample.
+
         Args:
-            x: Input with shape (..., dim)
-            latent: latent with shape (..., latent_dim). All transforms need to know about latent dim.
+            x (tensor): Input with shape (..., dim)
+
         Returns:
-            log_prob: Log-probability of the input (..., 1)
+            log_prob (tensor): Log-probability of the input with shape (..., 1)
         """
         if self.base_dist is None:
-            raise ValueError('Please define `base_dist` if you need log probability')
+            raise ValueError('Please define `base_dist` if you need log-probability')
         x, log_jac_diag = self.inverse(x, **kwargs)
         log_prob = self.base_dist.log_prob(x) + log_jac_diag.sum(-1)
         return log_prob.unsqueeze(-1)
 
     def sample(self, num_samples, latent=None, mask=None, **kwargs):
-        """ Transforms samples from a base to target distribution.
+        """
+        Transforms samples from the base to the target distribution.
         Uses reparametrization trick.
+
         Args:
-            num_samples: (tuple or int) Shape of samples
-            latent: Contex for conditional sampling with shape (latent_dim)
+            num_samples (tuple or int): Shape of samples
+            latent (tensor): Latent conditioning vector with shape (..., latent_dim)
+
         Returns:
-            x: Samples from target distribution (*num_samples, dim)
+            x (tensor): Samples from target distribution with shape (*num_samples, dim)
         """
         if self.base_dist is None:
             raise ValueError('Please define `base_dist` if you need sampling')
