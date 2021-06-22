@@ -1,12 +1,15 @@
-# Code adapted from Pyro
-# https://github.com/pyro-ppl/pyro/blob/dev/pyro/distributions/transforms/basic.py
-
 import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# Code adapted from Pyro
+
+
 class ELU(nn.Module):
+    """
+    Exponential linear unit and its inverse.
+    """
     def forward(self, x, **kwargs):
         y = F.elu(x)
         ljd = -F.relu(-x)
@@ -19,27 +22,28 @@ class ELU(nn.Module):
         ljd = F.relu(-log_term)
         return x, ljd
 
-class LeakyReLU(nn.Module):
-    def __init__(self, dim=None, **kwargs):
-        super().__init__()
-        if dim is None:
-            self.scale = torch.Tensor([1])
-        else:
-            self.scale = nn.Parameter(torch.Tensor(dim).uniform_(0.001, 0.1))
 
-    def leaky_relu(self, x, t):
+class LeakyReLU(nn.Module):
+    """
+    Leaky ReLU and its inverse.
+    For `x >= 0` returns `x`, else returns `negative_slope * x`.
+
+    Args:
+        negative_slope (float): Controls the angle of the negative slope. Default: 0.01
+    """
+    def __init__(self, negative_slope=0.01, **kwargs):
+        super().__init__()
+        assert negative_slope > 0, '`negative_slope` must be positive'
+        self.negative_slope = negative_slope
+
+    def _leaky_relu(self, x, negative_slope):
         zeros = torch.zeros_like(x)
-        y = torch.max(zeros, x) + t * torch.min(zeros, x)
-        ljd = torch.where(x >= 0., torch.zeros_like(x), torch.ones_like(x) * torch.log(t))
+        y = torch.max(zeros, x) + negative_slope * torch.min(zeros, x)
+        ljd = torch.where(x >= 0., torch.zeros_like(x), torch.ones_like(x) * math.log(negative_slope))
         return y, ljd
 
-    def forward(self, x, t=0.01, reverse=False, **kwargs):
-        if isinstance(t, int) or isinstance(t, float):
-            t = torch.Tensor([t])
-        else: # If t is tensor, treat it like time, identitiy at t=0
-            t = 1 - torch.tanh(F.relu(self.scale) * t)
-
-        y, ljd = self.leaky_relu(x, 1 / t if reverse else t)
+    def forward(self, x, reverse=False, **kwargs):
+        y, ljd = self._leaky_relu(x, 1 / self.negative_slope if reverse else self.negative_slope)
         return y, ljd
 
     def inverse(self, y, **kwargs):

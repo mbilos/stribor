@@ -4,12 +4,14 @@ import torch.nn as nn
 
 class EquivariantLayer(nn.Module):
     """
-    Similar to "On Learning Sets of Symmetric Elements" (https://arxiv.org/abs/2002.08599)
-    and "Deep Sets" (https://arxiv.org/abs/1703.06114) etc.
+    Permutation equivariant layer. Computes the transformation of each
+    set element conditioned on the sum of all elements.
+    Similar to "Deep Sets" (https://arxiv.org/abs/1703.06114) and
+    "On Learning Sets of Symmetric Elements" (https://arxiv.org/abs/2002.08599).
 
     Args:
-        in_dim: Dimension of input
-        out_dim: Dimension of output
+        in_dim (int): Dimension of input
+        out_dim (int): Dimension of output
     """
     def __init__(self, in_dim, out_dim, **kwargs):
         super().__init__()
@@ -31,16 +33,20 @@ class EquivariantLayer(nn.Module):
 
 class EquivariantNet(nn.Module):
     """
-    Neural network with equivariant layer. Given set input of shape (..., N, dim)
-    it will produce output of same shape with permutation invariant layers.
-    Same as MLP from `st.net` but with `EquivariantLayer` instead of `nn.Linear`.
+    Neural network with permutation equivariant layers.
+    Takes sets of elements of shape (..., N, dim). Permuting the elements across
+    the second to last dimension results in the same permutation on the output.
+    Args similar to `st.net.MLP` but uses `EquivariantLayer` instead of `nn.Linear`.
+
+    Example:
+    >>> net = stribor.net.EquivariantNet(2, [64, 64], 4)
 
     Args:
-        in_dim: (int) Last dimension of the input tensor
-        hidden_dims: (list) Hidden dimensions corresponding to layers
-        out_dim: (int) Last dimenstion of the output tensor
-        activation: (str) Name of the activation function from `torch.nn`
-        final_activation: (str) Name of the activation function from `torch.nn`
+        in_dim (int): Input size
+        hidden_dims (List[int]): Hidden dimensions
+        out_dim (int): Output size
+        activation (str, optional): Activation function, name from `torch.nn`. Default: 'Tanh'
+        final_activation (str, optional): Last activation. Default: None
     """
     def __init__(self, in_dim, hidden_dims, out_dim, activation='Tanh', final_activation=None, **kwargs):
         super().__init__()

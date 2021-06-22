@@ -125,7 +125,13 @@ class MatrixExponential(nn.Module):
     Corresponds to a solution of a linear ODE `dx/dt = Wx`.
 
     Example:
-    >>>
+    >>> torch.manual_seed(123)
+    >>> f = stribor.MatrixExponential(2)
+    >>> x = torch.rand(1, 2)
+    >>> f(x, t=1.)
+    (tensor([[0.0798, 1.3169]], tensor([[-0.4994,  0.4619]])
+    >>> f(x, t=torch.ones(1, 1))
+    (tensor([[0.0798, 1.3169]], tensor([[-0.4994,  0.4619]])
 
     Args:
         dim (int): Dimension of data

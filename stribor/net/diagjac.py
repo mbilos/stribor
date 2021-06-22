@@ -1,27 +1,26 @@
-# Neural Networks with Cheap Differential Operators
-# https://arxiv.org/abs/1912.03579
-
 from itertools import chain
 import torch
 import torch.nn as nn
 
 __all__ = ['FuncAndDiagJac']
 
+# Code adapted from https://proceedings.neurips.cc/paper/2019/hash/770f8e448d07586afbf77bb59f698587-Abstract.html
 
 class FuncAndDiagJac(torch.autograd.Function):
     """
     Given a f: R^d -> R^d, computes both f(x) and the diagonals of the Jacobian of f(x).
+    "Neural Networks with Cheap Differential Operators" (https://arxiv.org/abs/1912.03579)
 
     Args:
-        exclusive_net: Neural network with hollow Jacobian, i.e. ith input dimension does not
-            influence the ith output. E.g. `st.net.MADE`.
-        dimwise_net: Neural network with inputs (t, x, h) where x has (B,1) shape and h (B,H).
-            I applies the f:R->R function conditioned on t and h.
-        t: Input time of shape (1,).
-        x: Input of shape (...,D).
-        flat_params: Parameters of the exclusive and dimwise net. Can be obtained with
+        exclusive_net (Type[nn.Module]): Neural network with hollow Jacobian, i.e. ith input
+            does not influence the ith output. For example: `st.net.MADE`
+        dimwise_net (Type[nn.Module]): Neural network with inputs `(t, x, h)` where x has `(B,1)` shape
+            and `h` has `(B,H)`. It applies the f: R^{H+2} -> R function conditioned on `t` and `h`.
+        t (tensor): Input time of shape (1,)
+        x (tensor): Input of shape (...,D)
+        flat_params (): Parameters of the exclusive and dimwise net. Can be obtained with
             `st.util.flatten_params(exclusive_net, dimwise_net)`.
-        order: The derivation order (default: 1)
+        order (int): The derivation order. Default: 1
     """
 
     @staticmethod

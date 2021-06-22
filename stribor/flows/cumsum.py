@@ -4,14 +4,15 @@ import torch.nn.functional as F
 
 
 def diff(x, dim=-1):
-    """ Inverse of x.cumsum(dim=dim).
+    """
+    Inverse of x.cumsum(dim=dim).
     Compute differences between subsequent elements of the tensor.
     Only works on dims -1 and -2.
 
     Args:
-        x: Input tensor of arbitrary shape.
+        x (tensor): Input of arbitrary shape
     Returns:
-        diff: Tensor of the the same shape as x.
+        diff (tensor): Result with the same shape as x
     """
     if dim == 1:
         if x.dim() == 2:
@@ -38,12 +39,20 @@ def diff(x, dim=-1):
 
 
 class Cumsum(nn.Module):
+    """
+    Compute cumulative sum along the specified dimension of the tensor.
+
+    Example:
+    >>> f = stribor.Cumsum(-1)
+    >>> f(torch.ones(1, 4))
+    (tensor([[1., 2., 3., 4.]]), tensor([[0., 0., 0., 0.]]))
+
+    Args:
+        dim (int): Tensor dimension over which to perform the summation. Options: -1 or -2.
+    """
     def __init__(self, dim):
-        """Compute cumulative sum along the specified dimension of the tensor.
-        Args:
-            dim: Tensor dimension over which to perform the summation, -1 or -2.
-        """
         super().__init__()
+        assert dim in [-1, -2], '`dim` must be either `-1` or `-2`'
         self.dim = dim
 
     def forward(self, x, **kwargs):
@@ -55,9 +64,15 @@ class Cumsum(nn.Module):
         return x, torch.zeros_like(x)
 
 class Diff(nn.Module):
-    def __init__(self, *args, **kwargs):
+    """
+    Inverse of Cumsum transformation.
+
+    Args:
+        dim (int): Tensor dimension over which to perform the diff. Options: -1 or -2.
+    """
+    def __init__(self, dim):
         super().__init__()
-        self.base_flow = Cumsum(*args, **kwargs)
+        self.base_flow = Cumsum(dim)
 
     def forward(self, x, **kwargs):
         return self.base_flow.inverse(x, **kwargs)
@@ -66,29 +81,39 @@ class Diff(nn.Module):
         return self.base_flow.forward(x, **kwargs)
 
 
-class CumsumAxis(nn.Module):
-    def __init__(self, axis):
-        """Compute cumulative sum along the specified axis in the last dimension.
-        Args:
-            axis: Axis in the last dimension over which to perform the summation.
-        """
+class CumsumColumn(nn.Module):
+    """
+    Cumulative sum along the specific column in (..., M, N) matrix.
+
+    Example:
+    >>> f = stribor.CumsumColumn(1)
+    >>> f(torch.ones(3, 3))[0]
+    tensor([[1., 1., 1.],
+            [1., 2., 1.],
+            [1., 3., 1.]])
+
+    Args:
+        column (int): Column in the (batched) matrix (..., M, N) over which to
+            perform the summation
+    """
+    def __init__(self, column):
         super().__init__()
-        self.axis = axis
+        self.column = column
 
     def forward(self, x, **kwargs):
         y = x.clone()
-        y[..., self.axis] = y[..., self.axis].cumsum(-1)
+        y[..., self.column] = y[..., self.column].cumsum(-1)
         return y, torch.zeros_like(y)
 
     def inverse(self, y, **kwargs):
         x = y.clone()
-        x[..., self.axis] = diff(x[..., self.axis], -1)
+        x[..., self.column] = diff(x[..., self.column], -1)
         return x, torch.zeros_like(x)
 
-class DiffAxis(nn.Module):
-    def __init__(self, *args, **kwargs):
+class DiffColumn(nn.Module):
+    def __init__(self, column):
         super().__init__()
-        self.base_flow = CumsumAxis(*args, **kwargs)
+        self.base_flow = CumsumColumn(column)
 
     def forward(self, x, **kwargs):
         return self.base_flow.inverse(x, **kwargs)

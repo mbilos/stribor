@@ -20,12 +20,12 @@ def test_cumsum(input_shape, dim):
     check_jacobian(log_jac_x, log_jac_y)
 
 @pytest.mark.parametrize('input_shape', [(2, 10), (7, 4, 5), (2, 3, 4, 5)])
-@pytest.mark.parametrize('axis', [1, -1, 3])
-def test_cumsum_axis(input_shape, axis):
+@pytest.mark.parametrize('column', [1, -1, 3])
+def test_cumsum_column(input_shape, column):
     np.random.seed(123)
     torch.manual_seed(123)
 
-    model = st.CumsumAxis(axis)
+    model = st.CumsumColumn(column)
     x = torch.randn(*input_shape)
 
     y, log_jac_y = model.forward(x)
