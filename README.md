@@ -29,8 +29,8 @@ pip install -e .
     - Element-wise transformation `st.Affine`
     - Fixed (non-learnable) element-wise transformation `st.AffineFixed`
     - Linear layer with PLU factorization `st.AffinePLU`
-    - Matrix exponential `MatrixExponential`
-- Coupling layer that can be combined with any element-wise transformation `Coupling`
+    - Matrix exponential `st.MatrixExponential`
+- Coupling layer that can be combined with any element-wise transformation `st.Coupling`
 - Continuous normalizing flows `st.ContinuousNormalizingFlow`
     - Differential equations with stochastic trace estimation:
         - `st.net.DiffeqMLP`
@@ -50,10 +50,10 @@ pip install -e .
     - Flipping the indices `st.Flip`
     - Random permutation of indices `st.Permute`
 - Sigmoid `st.Sigmoid` and logit `st.Logit` function
-- Spline (quadratic or cubic) element-wise transformation `Spline`
+- Spline (quadratic or cubic) element-wise transformation `st.Spline`
 
 
-### Usage
+### Example
 
 To define a normalizing flow, define a base distribution and a series of transformations, e.g.:
 ```py
