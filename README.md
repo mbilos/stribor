@@ -8,8 +8,7 @@ Package to easily define normalizing flows and neural flows for Pytorch.
 ## Install package and dependencies
 
 ```
-pip install -r requirements.txt
-pip install -e .
+pip install git+https://github.com/mbilos/stribor.git
 ```
 
 ## Normalizing flows
@@ -58,6 +57,7 @@ pip install -e .
 To define a normalizing flow, define a base distribution and a series of transformations, e.g.:
 ```py
 import stribor as st
+import torch
 
 dim = 2
 base_dist = st.UnitNormal(dim)
