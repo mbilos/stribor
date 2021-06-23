@@ -104,7 +104,7 @@ def test_diffeq_exact_trace_attention(input_shape, hidden_dims, d_h, latent_dim,
 @pytest.mark.parametrize('input_shape', [(1, 2, 8), (3, 7, 2), (2, 3, 5, 2), (3, 16)])
 @pytest.mark.parametrize('hidden_dims', [[32, 64]])
 @pytest.mark.parametrize('d_h', [1, 3, 7])
-@pytest.mark.parametrize('latent_dim', [0])
+@pytest.mark.parametrize('latent_dim', [32])
 def test_backpropagation_through_encoder(input_shape, hidden_dims, d_h, latent_dim):
     class Model(nn.Module):
         def __init__(self, diffeq):
