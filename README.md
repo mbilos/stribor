@@ -83,5 +83,5 @@ y_inv, ljd_inv = flow.inverse(y)
 ## Run tests
 
 ```
-pytest
+pytest --pyargs stribor
 ```
