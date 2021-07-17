@@ -33,7 +33,7 @@ def test_affine(input_shape, num_layers, latent_dim, model):
 
     check_inverse(x, x_)
     check_jacobian(log_jac_x, log_jac_y)
-    check_one_training_step(input_shape[-1], model, x, latent)
+    check_one_training_step(model, x, latent=latent)
     if latent is None:
         check_log_jacobian_determinant(model, x)
 
@@ -67,7 +67,7 @@ def test_matrix_exponential(input_shape, num_layers, latent_dim, scalar_time):
 
     check_inverse(x, x_)
     check_jacobian(log_jac_x, log_jac_y)
-    check_one_training_step(input_shape[-1], model, x, latent, t=t)
+    check_one_training_step(model, x, latent=latent, t=t)
 
 def test_matrix_exponential_auc():
     torch.manual_seed(123)

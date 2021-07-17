@@ -25,7 +25,7 @@ def test_cnf_computation(input_shape, latent_dim):
 
     check_inverse(x, x_)
     check_jacobian(log_jac_x, log_jac_y)
-    check_one_training_step(input_shape[-1], model, x, latent)
+    check_one_training_step(model, x, latent=latent)
 
 
 @pytest.mark.parametrize('input_shape', [(1, 1), (2, 10), (10, 2), (7, 4, 5)])
@@ -70,4 +70,4 @@ def test_diffeq_equivariant(input_shape, odenet):
 
     check_inverse(x, x_)
     check_jacobian(log_jac_x, log_jac_y)
-    check_one_training_step(input_shape[-1], model, x, None)
+    check_one_training_step(model, x)

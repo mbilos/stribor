@@ -1,9 +1,6 @@
-import stribor as st
-import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.distributions as td
+import stribor as st
 
 # Code adapted from https://github.com/bayesiains/nsf
 

@@ -1,4 +1,5 @@
 import torch
+from stribor.util import divergence_from_jacobian
 
 def check_inverse(x, y_inverse):
     assert torch.isclose(x, y_inverse, atol=1e-4).all(), \
@@ -15,8 +16,8 @@ def check_log_jacobian_determinant(model, x):
     jacobian = jacobian.permute(0, 2, 1, 3).sum(0)
     assert torch.isclose(ljd.sum(1), torch.det(jacobian).abs().log(), atol=1e-4).all(), 'Jacobian is incorrect'
 
-def check_one_training_step(dim, model, x, latent, **kwargs):
-    log_prob = model.log_prob(x, latent=latent, **kwargs)
+def check_one_training_step(model, x, **kwargs):
+    log_prob = model.log_prob(x, **kwargs)
     loss = -log_prob.sum(-1).mean()
     loss.backward()
 

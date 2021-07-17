@@ -1,7 +1,7 @@
 import pytest
 import torch
 import stribor as st
-from stribor.test.base import check_inverse, check_one_training_step
+from stribor.test.base import check_inverse
 
 @pytest.mark.parametrize('input_dim', [(10, 2), (2, 10), (1, 10, 2), (5, 10, 2)])
 @pytest.mark.parametrize('hidden_dims', [[], [32, 64]])

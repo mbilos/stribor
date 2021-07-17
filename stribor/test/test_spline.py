@@ -34,7 +34,7 @@ def test_spline(input_shape, n_bins, lower, upper, spline_type, latent_dim, num_
     check_inverse(x, x_)
     check_jacobian(log_jac_x, log_jac_y)
     if num_layers > 0:
-        check_one_training_step(input_shape[-1], model, x, latent)
+        check_one_training_step(model, x, latent=latent)
 
 
 @pytest.mark.parametrize('input_shape', [(1, 1), (2, 10), (10, 2), (7, 4, 5)])

@@ -43,7 +43,7 @@ def test_coupling_flow(input_shape, hidden_dims, latent_dim, mask, flow_type, nu
 
     check_inverse(x, x_)
     check_jacobian(log_jac_x, log_jac_y)
-    check_one_training_step(input_shape[-1], model, x, latent)
+    check_one_training_step(model, x, latent=latent)
 
 @pytest.mark.parametrize('flow_type', ['Spline', 'Affine'])
 def test_coupling_flow_auc(flow_type):
@@ -99,7 +99,7 @@ def test_contiouous_coupling_flow(input_shape, hidden_dims, latent_dim, time_net
     assert not (x == y).all(), 'No transformation performed'
     check_inverse(x, x_)
     check_jacobian(log_jac_x, log_jac_y)
-    check_one_training_step(input_shape[-1], model, x, t=t, latent=latent)
+    check_one_training_step(model, x, t=t, latent=latent)
 
     # Check initial condition
     x = torch.rand(*input_shape)

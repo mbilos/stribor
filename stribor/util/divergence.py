@@ -27,8 +27,9 @@ def divergence_from_jacobian(f, inputs):
     Best used for input-output pairs with the same shape.
 
     Args:
-        f (callable): function that transforms a single or tuple of inputs to an output of same size
-        inputs (tensor, Tuple[tensor])
+        f (callable): Function that transforms a single input or a tuple
+            of inputs to an output of same size
+        inputs (tensor, Tuple[tensor]): Inputs to the function
     """
     if not isinstance(inputs, tuple):
         inputs = (inputs,)
