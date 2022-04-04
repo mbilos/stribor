@@ -3,7 +3,10 @@ import torch
 from torch.nn import functional as F
 import numpy as np
 
-# Code adapted from https://github.com/bayesiains/nsf
+
+def quadratic_spline_latent_dim(dim: int, n_bins) -> int:
+    return dim * (3 * n_bins - 1)
+
 
 def unconstrained_rational_quadratic_spline(inputs,
                                             unnorm_widths,
@@ -24,6 +27,7 @@ def unconstrained_rational_quadratic_spline(inputs,
     derivatives of spline bins. Normalizes parameters and applies quadratic spline.
     The domain and codomain can be defined with (lower, upper) or the domain can be
     defined with (left, right) and codomain with (bottom, top).
+    Code adapted from https://github.com/bayesiains/nsf
 
     Args:
         inputs (tensor): Input with shape (..., dim)

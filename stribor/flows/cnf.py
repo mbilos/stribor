@@ -1,32 +1,41 @@
-import stribor as st
-import numpy as np
+from typing import Dict, Optional, Tuple, Union
+from torchtyping import TensorType
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torchdiffeq import odeint_adjoint, odeint
 
-__all__ = ['ContinuousNormalizingFlow']
+import stribor as st
+from stribor import Transform
 
-# Code adapted from https://github.com/rtqichen/ffjord
+__all__ = ['ContinuousTransform']
 
 class ODEfunc(nn.Module):
     """
     ODE function used in continuous normalizing flows.
-    "FFJORD: Free-form Continuous Dynamics for Scalable Reversible Generative Models"
-    (https://arxiv.org/abs/1810.01367)
+    Based on FFJORD (https://arxiv.org/abs/1810.01367)
+    Code adapted from https://github.com/rtqichen/ffjord
 
     Args:
-        diffeq (Type[nn.Module]): Given inputs `x` and `t`, returns `dx` (and optionally trace)
+        diffeq (nn.Module): Given inputs `x` and `t`, returns `dx` (and optionally trace)
         divergence (str): How to calculate divergence.
-            Options: 'compute', 'compute_set', 'approximate', 'exact'
+            Options: 'compute', 'compute_set', 'approximate', 'exact', 'none'
         rademacher (bool, optional): Whether to use Rademacher distribution for stochastic
             estimator, otherwise uses normal distribution. Default: False
         has_latent (bool, optional): Whether we have latent inputs. Default: False
         set_data (bool, optional): Whether we have set data with shape (..., N, dim). Default: False
     """
-    def __init__(self, diffeq, divergence=None, rademacher=False, has_latent=False, set_data=False, **kwargs):
+    def __init__(
+        self,
+        diffeq: nn.Module,
+        divergence: Optional[str] = None,
+        rademacher: Optional[bool] = False,
+        has_latent: Optional[bool] = False,
+        set_data: Optional[bool] = False,
+        **kwargs,
+    ):
         super().__init__()
-        assert divergence in ['compute', 'compute_set', 'approximate', 'exact']
+        assert divergence in ['compute', 'compute_set', 'approximate', 'exact', 'none']
 
         self.diffeq = diffeq
         self.rademacher = rademacher
@@ -43,7 +52,11 @@ class ODEfunc(nn.Module):
     def num_evals(self):
         return self._num_evals.item()
 
-    def forward(self, t, states):
+    def forward(
+        self,
+        t: TensorType[()],
+        states: Union[Tuple, Tuple[TensorType[..., 'dim'], TensorType[..., 'dim']]],
+    ) -> Union[Tuple, Tuple[TensorType[..., 'dim'], TensorType[..., 'dim']]]:
         self._num_evals += 1
 
         y = states[0]
@@ -66,6 +79,9 @@ class ODEfunc(nn.Module):
             else:
                 self._e = torch.randn_like(y)
 
+        if self.divergence == 'none':
+            dy = self.diffeq(t, y, latent=latent, mask=mask)
+            return (dy,) + tuple(torch.zeros_like(s) for s in states[2:])
         if self.divergence == 'exact':
             dy, divergence = self.diffeq(t, y, latent=latent, mask=mask)
         else:
@@ -80,24 +96,24 @@ class ODEfunc(nn.Module):
                 else:
                     divergence = st.util.divergence_approx(dy, y, self._e)
 
-        return (dy, -divergence) + tuple(torch.zeros_like(x) for x in states[2:])
+        return (dy, -divergence) + tuple(torch.zeros_like(s) for s in states[2:])
 
 
-class ContinuousNormalizingFlow(nn.Module):
+class ContinuousTransform(Transform):
     """
-    Continuous normalizing flow.
+    Continuous normalizing flow transformation.
     "Neural Ordinary Differential Equations" (https://arxiv.org/abs/1806.07366)
 
     Example:
     >>> torch.manual_seed(123)
     >>> dim = 2
-    >>> f = stribor.ContinuousNormalizingFlow(dim, net=stribor.net.DiffeqMLP(dim + 1, [64], dim))
+    >>> f = stribor.ContinuousTransform(dim, net=stribor.net.DiffeqMLP(dim + 1, [64], dim))
     >>> f(torch.randn(1, dim))
     (tensor([[-0.1527, -0.4164]], tensor([[-0.1218, -0.7133]])
 
     Args:
         dim (int): Input data dimension
-        net (Type[nn.Module]): Neural net that defines a differential equation.
+        net (nn.Module): Neural net that defines a differential equation.
             It takes `x` and `t` and returns `dx` (and optionally trace).
         T (float): Upper bound of integration. Default: 1.0
         divergence: How to calculate divergence. Options:
@@ -125,21 +141,21 @@ class ContinuousNormalizingFlow(nn.Module):
     """
     def __init__(
         self,
-        dim,
-        net=None,
-        T=1.0,
-        divergence='approximate',
-        use_adjoint=True,
-        has_latent=False,
-        solver='dopri5',
-        solver_options={},
-        test_solver=None,
-        test_solver_options=None,
-        set_data=False,
-        rademacher=False,
-        atol=1e-5,
-        rtol=1e-3,
-        **kwargs
+        dim: int,
+        net: nn.Module = None,
+        T: float = 1.0,
+        divergence: str = 'approximate',
+        use_adjoint: bool = True,
+        has_latent: bool = False,
+        solver: str = 'dopri5',
+        solver_options: Optional[Dict] = {},
+        test_solver: str = None,
+        test_solver_options: Optional[Dict] = None,
+        set_data: bool = False,
+        rademacher: bool = False,
+        atol: float = 1e-5,
+        rtol: float = 1e-3,
+        **kwargs,
     ):
         super().__init__()
 
@@ -158,9 +174,17 @@ class ContinuousNormalizingFlow(nn.Module):
         self.atol = atol
         self.rtol = rtol
 
-    def forward(self, x, latent=None, mask=None, reverse=False, **kwargs):
+    def forward_and_log_det_jacobian(
+        self,
+        x: TensorType[..., 'dim'],
+        latent: Optional[TensorType[..., 'latent']] = None,
+        mask: Optional[Union[TensorType[..., 1], TensorType[..., 'dim']]] = None,
+        *,
+        reverse: Optional[bool] = False,
+        **kwargs,
+    ) -> Tuple[TensorType[..., 'dim'], TensorType[..., 1]]:
         # Set inputs
-        logp = torch.zeros_like(x)
+        log_trace_jacobian = torch.zeros_like(x)
 
         # Set integration times
         integration_times = torch.tensor([0.0, self.T]).to(x)
@@ -170,7 +194,7 @@ class ContinuousNormalizingFlow(nn.Module):
         # Refresh the odefunc statistics
         self.odefunc.before_odeint()
 
-        initial = (x, logp)
+        initial = (x, log_trace_jacobian)
         if latent is not None:
             initial += (latent,)
         if mask is not None:
@@ -191,13 +215,50 @@ class ContinuousNormalizingFlow(nn.Module):
             state_t = tuple(s[1] for s in state_t)
 
         # Collect outputs with correct shape
-        x, logp = state_t[:2]
-        return x, -logp
+        x, log_trace_jacobian = state_t[:2]
+        return x, -log_trace_jacobian.sum(-1, keepdim=True)
 
-    def inverse(self, x, logp=None, latent=None, mask=None, **kwargs):
-        return self.forward(x, logp=logp, latent=latent, mask=mask, reverse=True)
+    def inverse_and_log_det_jacobian(
+        self,
+        y: TensorType[..., 'dim'],
+        latent: Optional[TensorType[..., 'latent']] = None,
+        mask: Optional[Union[TensorType[..., 1], TensorType[..., 'dim']]] = None,
+        **kwargs,
+    ) -> Tuple[TensorType[..., 'dim'], TensorType[..., 1]]:
+        return self.forward_and_log_det_jacobian(y, latent, mask, reverse=True)
 
-    def num_evals(self):
+    def forward(
+        self,
+        x: TensorType[..., 'dim'],
+        latent: Optional[TensorType[..., 'latent']] = None,
+        mask: Optional[Union[TensorType[..., 1], TensorType[..., 'dim']]] = None,
+        **kwargs,
+    ) -> TensorType[..., 'dim']:
+        y, _ = self.forward_and_log_det_jacobian(x, latent, mask)
+        return y
+
+    def inverse(
+        self,
+        y: TensorType[..., 'dim'],
+        latent: Optional[TensorType[..., 'latent']] = None,
+        mask: Optional[Union[TensorType[..., 1], TensorType[..., 'dim']]] = None,
+        **kwargs,
+    ) -> TensorType[..., 'dim']:
+        x, _ = self.inverse_and_log_det_jacobian(y, latent, mask)
+        return x
+
+    def log_det_jacobian(
+        self,
+        x: TensorType[..., 'dim'],
+        y: TensorType[..., 'dim'],
+        mask: Optional[Union[TensorType[..., 1], TensorType[..., 'dim']]] = None,
+        latent: Optional[TensorType[..., 'latent']] = None,
+        **kwargs
+    ) -> TensorType[..., 1]:
+        _, log_det_jacobian = self.forward_and_log_det_jacobian(x, latent, mask)
+        return log_det_jacobian
+
+    def _num_evals(self):
         return self.odefunc._num_evals.item()
 
 def _flip(x, dim):

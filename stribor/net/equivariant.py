@@ -1,5 +1,6 @@
-import stribor as st
-import torch
+from typing import List, Optional
+from torchtyping import TensorType
+
 import torch.nn as nn
 
 class EquivariantLayer(nn.Module):
@@ -13,12 +14,22 @@ class EquivariantLayer(nn.Module):
         in_dim (int): Dimension of input
         out_dim (int): Dimension of output
     """
-    def __init__(self, in_dim, out_dim, **kwargs):
+    def __init__(
+        self,
+        in_dim: int,
+        out_dim: int,
+        **kwargs
+    ):
         super().__init__()
         self.l1 = nn.Linear(in_dim, out_dim)
         self.l2 = nn.Linear(in_dim, out_dim)
 
-    def forward(self, x, mask=None, **kwargs):
+    def forward(
+        self,
+        x: TensorType[..., 'dim'],
+        mask: Optional[TensorType[..., 'dim']] = None,
+        **kwargs,
+    ) -> TensorType[..., 'out']:
         y1 = self.l1(x)
         y2 = self.l2(x.sum(-2, keepdim=True))
 
@@ -48,7 +59,15 @@ class EquivariantNet(nn.Module):
         activation (str, optional): Activation function from `torch.nn`. Default: 'Tanh'
         final_activation (str, optional): Last activation. Default: None
     """
-    def __init__(self, in_dim, hidden_dims, out_dim, activation='Tanh', final_activation=None, **kwargs):
+    def __init__(
+        self,
+        in_dim: int,
+        hidden_dims: List[int],
+        out_dim: int,
+        activation: str = 'Tanh',
+        final_activation: str = None,
+        **kwargs,
+    ):
         super().__init__()
 
         self.activation = getattr(nn, activation)()
@@ -60,8 +79,12 @@ class EquivariantNet(nn.Module):
             self.layers.append(EquivariantLayer(in_, out_))
         self.layers = nn.ModuleList(self.layers)
 
-    def forward(self, x, mask=None, **kwargs):
-        """ For input (..., N, in_dim) returns (..., N, out_dim) """
+    def forward(
+        self,
+        x: TensorType[..., 'dim'],
+        mask: Optional[TensorType[..., 'dim']],
+        **kwargs,
+    ) -> TensorType[..., 'out']:
         for layer in self.layers[:-1]:
             x = layer(x, mask=mask)
             x = self.activation(x)

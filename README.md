@@ -1,9 +1,9 @@
 # Stibor
 
-Package to easily define normalizing flows and neural flows for Pytorch.
+Normalizing flows and neural flows for PyTorch.
 
-- Normalizing flows define complicated high-dimensional densities as transformations of random variables.
-- Neural flows define continuous time dynamics with invertible neural networks.
+- Normalizing flow defines a complicated probability density function as a transformation of the random variable.
+- Neural flow defines continuous time dynamics with invertible neural networks.
 
 ## Install package and dependencies
 
@@ -17,20 +17,21 @@ pip install stribor
 
 - Normal `st.Normal` and `st.UnitNormal` and `st.MultivariateNormal`
 - Uniform `st.UnitUniform`
-- Other distributions from `torch.distributions`
+- Or, use distributions from `torch.distributions`
 
 ### Invertible transformations
 
 - Activation functions
     - ELU `st.ELU`
     - Leaky ReLU `st.LeakyReLU`
+    - Sigmoid `st.Sigmoid`
+    - Logit (inverse sigmoid) `st.Logit`
 - Affine
     - Element-wise transformation `st.Affine`
-    - Fixed (non-learnable) element-wise transformation `st.AffineFixed`
-    - Linear layer with PLU factorization `st.AffinePLU`
+    - Linear layer with LU factorization `st.AffineLU`
     - Matrix exponential `st.MatrixExponential`
 - Coupling layer that can be combined with any element-wise transformation `st.Coupling`
-- Continuous normalizing flows `st.ContinuousNormalizingFlow`
+- Continuous normalizing flows `st.ContinuousTransform`
     - Differential equations with stochastic trace estimation:
         - `st.net.DiffeqMLP`
         - `st.net.DiffeqDeepset`
@@ -48,11 +49,10 @@ pip install stribor
 - Permutations
     - Flipping the indices `st.Flip`
     - Random permutation of indices `st.Permute`
-- Sigmoid `st.Sigmoid` and logit `st.Logit` function
 - Spline (quadratic or cubic) element-wise transformation `st.Spline`
 
 
-### Example
+### Example: Normalizing flow
 
 To define a normalizing flow, define a base distribution and a series of transformations, e.g.:
 ```py
@@ -60,24 +60,48 @@ import stribor as st
 import torch
 
 dim = 2
+
 base_dist = st.UnitNormal(dim)
 
 transforms = [
     st.Coupling(
-        flow=st.Affine(dim, latent_net=st.net.MLP(dim, [64], dim)),
-        mask='ordered_right_half'
+        transform=st.Affine(dim, latent_net=st.net.MLP(dim, [64], 2 * dim)),
+        mask='ordered_right_half',
     ),
-    st.ContinuousNormalizingFlow(
+    st.ContinuousTransform(
         dim,
-        net=st.net.DiffeqMLP(dim + 1, [64], dim)
+        net=st.net.DiffeqMLP(dim + 1, [64], dim),
     )
 ]
 
-flow = st.Flow(base_dist, transforms)
+flow = st.NormalizingFlow(base_dist, transforms)
 
-x = torch.rand(1, dim)
-y, ljd = flow(x)
-y_inv, ljd_inv = flow.inverse(y)
+x = torch.rand(10, dim)
+y = flow(x) # Forward transformation
+log_prob = flow.log_prob(y) # Log-probability p(y)
+```
+
+### Example: Neural flow
+
+Neural flows are defined similarly but now we don't need the base density and all the invertible transformations must depend on time. In particular, at `t=0`, the transformation becomes an identity.
+```py
+import torch
+import stribor as st
+
+dim = 2
+
+f = st.NeuralFlow([
+    st.ContinuousAffineCoupling(
+        latent_net=st.net.MLP(dim, [32], 2 * dim),
+        time_net=st.net.TimeLinear(dim),
+        mask='ordered_0',
+        concatenate_time=False,
+    ),
+])
+
+x = torch.randn(10, 4, dim)
+t = torch.randn_like(x[...,:1])
+y = f(x, t=t) # Outputs the same dimension as x
 ```
 
 ## Run tests

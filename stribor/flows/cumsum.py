@@ -1,16 +1,23 @@
+from torchtyping import TensorType
+import warnings
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from stribor import ElementwiseTransform
+from stribor.flow import Transform
 
-def diff(x, dim=-1):
+
+def diff(x: TensorType[..., 'dim'], dim: int = -1) -> TensorType[..., 'dim']:
     """
-    Inverse of x.cumsum(dim=dim).
+    Inverse of torch.cumsum(x, dim=dim).
     Compute differences between subsequent elements of the tensor.
     Only works on dims -1 and -2.
 
     Args:
         x (tensor): Input of arbitrary shape
+
     Returns:
         diff (tensor): Result with the same shape as x
     """
@@ -38,9 +45,9 @@ def diff(x, dim=-1):
         raise ValueError("dim must be equal to -1 or -2")
 
 
-class Cumsum(nn.Module):
+class Cumsum(ElementwiseTransform):
     """
-    Compute cumulative sum along the specified dimension of the tensor.
+    Cumulative sum along the specified dimension of the tensor.
 
     Example:
     >>> f = stribor.Cumsum(-1)
@@ -50,40 +57,43 @@ class Cumsum(nn.Module):
     Args:
         dim (int): Tensor dimension over which to perform the summation. Options: -1 or -2.
     """
-    def __init__(self, dim):
+    def __init__(self, dim: int):
         super().__init__()
-        assert dim in [-1, -2], '`dim` must be either `-1` or `-2`'
+        assert dim == -1, '`dim` must be equal to -1'
         self.dim = dim
 
-    def forward(self, x, **kwargs):
+    def forward(self, x: TensorType[..., 'dim'], **kwargs) -> TensorType[..., 'dim']:
         y = x.cumsum(self.dim)
-        return y, torch.zeros_like(y)
+        return y
 
-    def inverse(self, y, **kwargs):
+    def inverse(self, y: TensorType[..., 'dim'], **kwargs) -> TensorType[..., 'dim']:
         x = diff(y, self.dim)
-        return x, torch.zeros_like(x)
+        return x
 
-class Diff(nn.Module):
+    def log_det_jacobian(
+        self, x: TensorType[..., 'dim'], y: TensorType[..., 'dim'], **kwargs,
+    ) -> TensorType[..., 1]:
+        return torch.zeros_like(x[...,:1])
+
+    def log_diag_jacobian(
+        self, x: TensorType[..., 'dim'], y: TensorType[..., 'dim'], **kwargs,
+    ) -> TensorType[..., 'dim']:
+        return torch.zeros_like(x)
+
+class Diff(Cumsum):
     """
     Inverse of Cumsum transformation.
-
-    Args:
-        dim (int): Tensor dimension over which to perform the diff. Options: -1 or -2.
     """
-    def __init__(self, dim):
-        super().__init__()
-        self.base_flow = Cumsum(dim)
-
     def forward(self, x, **kwargs):
-        return self.base_flow.inverse(x, **kwargs)
+        return super().inverse(x, **kwargs)
 
-    def inverse(self, x, **kwargs):
-        return self.base_flow.forward(x, **kwargs)
+    def inverse(self, y, **kwargs):
+        return super().forward(y, **kwargs)
 
 
-class CumsumColumn(nn.Module):
+class CumsumColumn(Transform):
     """
-    Cumulative sum along the specific column in (..., M, N) matrix.
+    Cumulative sum along the specific *single* column in (..., M, N) matrix.
 
     Example:
     >>> f = stribor.CumsumColumn(1)
@@ -96,27 +106,37 @@ class CumsumColumn(nn.Module):
         column (int): Column in the (batched) matrix (..., M, N) over which to
             perform the summation
     """
-    def __init__(self, column):
+    def __init__(self, column: int):
         super().__init__()
+        warnings.warn('The Jacobian related function are not tested.', RuntimeWarning)
         self.column = column
 
-    def forward(self, x, **kwargs):
+    def forward(self, x: TensorType[..., 'dim'], **kwargs) -> TensorType[..., 'dim']:
         y = x.clone()
         y[..., self.column] = y[..., self.column].cumsum(-1)
-        return y, torch.zeros_like(y)
+        return y
 
-    def inverse(self, y, **kwargs):
+    def inverse(self, y: TensorType[..., 'dim'], **kwargs) -> TensorType[..., 'dim']:
         x = y.clone()
         x[..., self.column] = diff(x[..., self.column], -1)
-        return x, torch.zeros_like(x)
+        return x
 
-class DiffColumn(nn.Module):
-    def __init__(self, column):
-        super().__init__()
-        self.base_flow = CumsumColumn(column)
+    def log_det_jacobian(
+        self, x: TensorType[..., 'dim'], y: TensorType[..., 'dim'], **kwargs,
+    ) -> TensorType[..., 1]:
+        return torch.zeros_like(x[...,:1])
 
+    def log_diag_jacobian(
+        self, x: TensorType[..., 'dim'], y: TensorType[..., 'dim'], **kwargs,
+    ) -> TensorType[..., 'dim']:
+        return torch.zeros_like(x)
+
+class DiffColumn(CumsumColumn):
+    """
+    Inverse of CumsumColumn transformation.
+    """
     def forward(self, x, **kwargs):
-        return self.base_flow.inverse(x, **kwargs)
+        return super().inverse(x, **kwargs)
 
-    def inverse(self, x, **kwargs):
-        return self.base_flow.forward(x, **kwargs)
+    def inverse(self, y, **kwargs):
+        return super().forward(y, **kwargs)

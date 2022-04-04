@@ -1,14 +1,20 @@
+from typing import Optional, Tuple
+from torchtyping import TensorType
+
 import torch
 import torch.nn as nn
+
 import stribor as st
+from stribor import ElementwiseTransform
 
-# Code adapted from https://github.com/bayesiains/nsf
 
-class Spline(nn.Module):
+class Spline(ElementwiseTransform):
     """
     Spline flow (https://arxiv.org/abs/1906.04032).
     Elementwise transformation of input vector using spline functions
     defined on the interval (lower,upper).
+
+    Code adapted from https://github.com/bayesiains/nsf
 
     Example:
     >>> torch.manual_seed(123)
@@ -21,16 +27,25 @@ class Spline(nn.Module):
     Args:
         dim (int): Dimension of data
         n_bins (int): Number of bins/spline knots.
-        latent_net (Type[nn.Module], optional): Neural network that takes `latent`
-            and outputs transformation parameters of size `[dim * (2 * n_bins + 2)]`
-            for qubic and `[dim * (3 * n_bins - 1)]` for quadratic spline. Default: None
+        latent_net (nn.Module, optional): Neural network that takes `latent`
+            and outputs transformation parameters of size `dim * (2 * n_bins + 2)`
+            for cubic and `dim * (3 * n_bins - 1)` for quadratic spline. Default: None
         lower (float, optional): Lower bound of the transformation domain. Default: 0
         upper (float, optional): Upper bound of the transformation domain. Default: 1
         spline_type (str, optional): Which spline function to use.
-            Options: `quadratic`, `cubic`. Default: quadratic
+            Options: `quadratic`, `cubic`. Default: cubic
         latent_net: Dimension of the input latent vector
     """
-    def __init__(self, dim, n_bins, latent_net=None, lower=0, upper=1, spline_type='quadratic', **kwargs):
+    def __init__(
+        self,
+        dim: int,
+        n_bins: int,
+        latent_net: Optional[nn.Module] = None,
+        lower: Optional[int] = 0,
+        upper: Optional[int] = 1,
+        spline_type: Optional[str] ='cubic',
+        **kwargs,
+    ):
         super().__init__()
         self.lower = lower
         self.upper = upper
@@ -58,7 +73,9 @@ class Spline(nn.Module):
         nn.init.xavier_uniform_(self.height)
         nn.init.xavier_uniform_(self.derivative)
 
-    def get_params(self, latent):
+    def _get_params(
+        self, latent: TensorType[..., 'latent'] = None,
+    ) -> Tuple[TensorType[..., 'dim', 'bins'], TensorType[..., 'dim', 'bins'], TensorType[..., 'dim', 'der']]:
         if latent is None:
             return self.width, self.height, self.derivative
         else:
@@ -69,9 +86,58 @@ class Spline(nn.Module):
             derivative = params[...,2*self.n_bins:]
             return width, height, derivative
 
-    def forward(self, x, latent=None, reverse=False, **kwargs):
-        w, h, d = self.get_params(latent)
+    def forward(
+        self, x: TensorType[..., 'dim'], latent: TensorType[..., 'latent'] = None, **kwargs,
+    ) -> TensorType[..., 'dim']:
+        y, _ = self.forward_and_log_diag_jacobian(x, latent)
+        return y
+
+    def inverse(
+        self, y: TensorType[..., 'dim'], latent: TensorType[..., 'latent'] = None, **kwargs,
+    ) -> TensorType[..., 'dim']:
+        x, _ = self.inverse_and_log_diag_jacobian(y, latent)
+        return x
+
+    def forward_and_log_diag_jacobian(
+        self, x: TensorType[..., 'dim'], latent: TensorType[..., 'latent'] = None, *, reverse=False, **kwargs,
+    ) -> Tuple[TensorType[..., 'dim'], TensorType[..., 'dim']]:
+        w, h, d = self._get_params(latent)
         return self.spline(x, w, h, d, inverse=reverse, lower=self.lower, upper=self.upper)
 
-    def inverse(self, y, latent=None, **kwargs):
-        return self.forward(y, latent=latent, reverse=True)
+    def inverse_and_log_diag_jacobian(
+        self, y: TensorType[..., 'dim'], latent: TensorType[..., 'latent'] = None, **kwargs
+    ) -> Tuple[TensorType[..., 'dim'], TensorType[..., 'dim']]:
+        x, log_diag_jacobian = self.forward_and_log_diag_jacobian(y, latent, reverse=True)
+        return x, log_diag_jacobian
+
+    def forward_and_log_det_jacobian(
+        self, x: TensorType[..., 'dim'], latent: TensorType[..., 'latent'] = None, **kwargs,
+    ) -> Tuple[TensorType[..., 'dim'], TensorType[..., 1]]:
+        y, log_diag_jacobian = self.forward_and_log_diag_jacobian(x, latent)
+        return y, log_diag_jacobian.sum(-1, keepdim=True)
+
+    def inverse_and_log_det_jacobian(
+        self, y: TensorType[..., 'dim'], latent: TensorType[..., 'latent'] = None, **kwargs,
+    ) -> Tuple[TensorType[..., 'dim'], TensorType[..., 1]]:
+        x, log_diag_jacobian = self.forward_and_log_diag_jacobian(y, latent, reverse=True)
+        return x, log_diag_jacobian.sum(-1, keepdim=True)
+
+    def log_det_jacobian(
+        self,
+        x: TensorType[..., 'dim'],
+        y: TensorType[..., 'dim'],
+        latent: TensorType[..., 'latent'] = None,
+        **kwargs,
+    ) -> TensorType[..., 1]:
+        _, log_det_jacobian = self.forward_and_log_det_jacobian(x, latent)
+        return log_det_jacobian
+
+    def log_diag_jacobian(
+        self,
+        x: TensorType[..., 'dim'],
+        y: TensorType[..., 'dim'],
+        latent: TensorType[..., 'latent'] = None,
+        **kwargs,
+    ) -> TensorType[..., 'dim']:
+        _, log_diag_jacobian = self.forward_and_log_diag_jacobian(x, latent)
+        return log_diag_jacobian

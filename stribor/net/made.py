@@ -1,7 +1,6 @@
-# Implements Masked AutoEncoder for Density Estimation, by Germain et al. 2015
-# Re-implementation by Andrej Karpathy based on https://arxiv.org/abs/1502.03509
+from typing import Union, List
+from torchtyping import TensorType
 
-import stribor as st
 import numpy as np
 import torch
 import torch.nn as nn
@@ -10,8 +9,15 @@ import torch.nn.functional as F
 __all__ = ['MADE']
 
 class MaskedLinear(nn.Linear):
-    """ Same as Linear except has a configurable mask on the weights. """
-    def __init__(self, in_features, out_features, bias=True):
+    """
+    Same as torch.nn.Linear except has a mask on the weights.
+
+    Args:
+        in_features (int): Input data dimension
+        out_features (int): Output data dimension
+        bias (bool): Whether to use bias. Default: True
+    """
+    def __init__(self, in_features: int, out_features: int, bias=True):
         super().__init__(in_features, out_features, bias)
         self.register_buffer('mask', torch.ones(out_features, in_features))
 
@@ -31,16 +37,27 @@ class MADE(nn.Module):
         hidden_dims (List[int]): Hidden dimensions
         out_dim (int): Output size. Has to be multiple of `in_dim` such that each dimension
             has assigned output dimensions. `return_per_dim` governs how the output looks like
-        activation (str, optional): Activation function from `torch.nn`. Default: 'Tanh'
-        final_activation (str, optional): Last activation. Default: None
-        num_masks (int, optional): Number of ordering ensembles. Default: 1
-        natural_ordering (bool, optional): Whether to use natural ordering of dimensions,
-            otherwise uses random permutations. Default: False
-        return_per_dim: Whether to return in (..., in_dim, out_dim / in_dim) format,
+        activation (str): Activation function from `torch.nn`. Default: 'Tanh'
+        final_activation (str): Last activation. Default: None
+        num_masks (int): Number of ordering ensembles. Default: 1
+        natural_ordering (bool): Whether to use natural order, else random. Default: False
+        reverse_ordering (bool): Whether to reverse the order. Default: False
+        return_per_dim (bool): Whether to return in (..., in_dim, out_dim / in_dim) format,
             otherwise returns (..., out_dim). Default: False
     """
-    def __init__(self, in_dim, hidden_dims, out_dim, activation='Tanh', final_activation=None,
-                 num_masks=1, natural_ordering=False, reverse_ordering=False, return_per_dim=False, **kwargs):
+    def __init__(
+        self,
+        in_dim: int,
+        hidden_dims: List[int],
+        out_dim: int,
+        activation: str = 'Tanh',
+        final_activation: str = None,
+        num_masks: int = 1,
+        natural_ordering: bool = False,
+        reverse_ordering: bool = False,
+        return_per_dim: bool = False,
+        **kwargs,
+    ):
         super().__init__()
         self.in_dim = in_dim
         self.out_dim = out_dim
@@ -51,6 +68,7 @@ class MADE(nn.Module):
         self.natural_ordering = natural_ordering
         self.reverse_ordering = reverse_ordering
         self.num_masks = num_masks
+
         assert self.out_dim % self.in_dim == 0, "out_dim must be integer multiple of in_dim"
 
         self.net = self._get_net()
@@ -103,15 +121,9 @@ class MADE(nn.Module):
         for l, m in zip(layers, masks):
             l.set_mask(m)
 
-    def forward(self, x, **kwargs):
-        """
-        Args:
-            x (tensor): Input with shape (..., in_dim)
-
-        Returns:
-            y (tensor): Output with shape (..., in_dim, out_dim / in_dim)
-                if `return_per_dim=True`, else (..., out_dim)
-        """
+    def forward(
+        self, x: TensorType[..., 'dim'], **kwargs,
+    ) -> Union[TensorType[..., 'out'], TensorType[..., 'dim', 'out/dim']]:
         original_shape = x.shape
 
         x = x.view(-1, original_shape[-1])

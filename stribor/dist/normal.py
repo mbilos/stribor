@@ -1,10 +1,14 @@
+from typing import Union
+from torchtyping import TensorType
+from numbers import Number
+
 import torch
 import torch.distributions as td
 
 class Normal(td.Independent):
     """
-    Normal distribution. Inherits torch.distributions.Independent
-    so it acts as a distribution on the d-dimensional space.
+    Normal distribution on the d-dimensional space defined by
+    mean and std tensors of any shape.
 
     Example:
     >>> dist = stribor.Normal(0., 1.)
@@ -18,7 +22,12 @@ class Normal(td.Independent):
         loc (float or tensor): Mean
         scale (float or tensor): Standard deviation
     """
-    def __init__(self, loc, scale, **kwargs):
+    def __init__(
+        self,
+        loc: Union[Number, TensorType[...]],
+        scale: Union[Number, TensorType[...]],
+        **kwargs,
+    ):
         self.loc = loc
         self.scale = scale
 
@@ -30,7 +39,7 @@ class Normal(td.Independent):
 
 class UnitNormal(Normal):
     """
-    Unit normal distribution.
+    Unit `st.Normal`. Specify only the dimension.
 
     Example:
     >>> dist = stribor.UnitNormal(2)
@@ -40,14 +49,20 @@ class UnitNormal(Normal):
     Args:
         dim (int): Dimension of data
     """
-    def __init__(self, dim, **kwargs):
+    def __init__(self, dim: int, **kwargs):
         self.dim = dim
-        super().__init__(torch.zeros(self.dim), torch.ones(self.dim))
+        super().__init__(torch.zeros(self.dim), torch.ones(self.dim), **kwargs)
 
 
 class MultivariateNormal(td.MultivariateNormal):
     """
-    Wrapper for torch.distributions.MultivariateNormal
+    Wrapper for `torch.distributions.MultivariateNormal`.
+
+    Args:
+        loc (Tensor): mean of the distribution
+        covariance_matrix (Tensor): positive-definite covariance matrix
+        precision_matrix (Tensor): positive-definite precision matrix
+        scale_tril (Tensor): lower-triangular factor of covariance, with positive-valued diagonal
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

@@ -1,33 +1,46 @@
-import stribor as st
+from typing import List, Union
+from torchtyping import TensorType
+from abc import ABCMeta, abstractmethod
+
 import torch
 import torch.nn as nn
+import stribor as st
 
-# Regular nets, use `divergence=approximate` in CNF
+#####################################################
+# Use `divergence=approximate` in ContinuousTransform
+#####################################################
 
-class DiffeqConcat(nn.Module):
+class DiffeqNet(nn.Module, metaclass=ABCMeta):
+    @abstractmethod
+    def forward(
+        self,
+        t: TensorType[1],
+        x: TensorType[..., 'dim'],
+        latent: TensorType[..., 'latent'] = None,
+        **kwargs,
+    ) -> TensorType[..., 'out']:
+        pass
+
+
+class DiffeqConcat(DiffeqNet):
     """
-    Differential equation that concatenates the input and time.
+    Differential equation that concatenates the input with time.
 
     Args:
-        net (Type[nn.Module]): Neural network that concatenates
-            input `x`, time `t` and `latent` (optional) and outputs
-            the derivative of the same size as `x`.
+        net (nn.Module): Neural network with `dim + 1 (+ latent)`
+        input size and `dim` output size.
     """
     def __init__(self, net):
         super().__init__()
         self.net = net
 
-    def forward(self, t, x, latent=None, **kwargs):
-        """
-        Args:
-            t (tensor): Time with shape (..., 1)
-            x (tensor): Input with shape (..., dim)
-            latent (tensor, optional): Latent vector with shape (..., latent_dim).
-                Default: None
-
-        Returns:
-            dx (tensor): Derivative in `x` with shape (..., dim)
-        """
+    def forward(
+        self,
+        t: TensorType[1],
+        x: TensorType[..., 'dim'],
+        latent: TensorType[..., 'latent'] = None,
+        **kwargs,
+    ) -> TensorType[..., 'out']:
         t = torch.ones_like(x[..., :1]) * t
         input = torch.cat([t, x], -1)
         if latent is not None:
@@ -50,7 +63,15 @@ class DiffeqMLP(DiffeqConcat):
     Args:
         Same as in `st.net.MLP`
     """
-    def __init__(self, in_dim, hidden_dims, out_dim, activation='Tanh', final_activation=None, **kwargs):
+    def __init__(
+        self,
+        in_dim: int,
+        hidden_dims: List[int],
+        out_dim: int,
+        activation: str = 'Tanh',
+        final_activation: str = None,
+        **kwargs,
+    ):
         super().__init__(st.net.MLP(in_dim, hidden_dims, out_dim, activation, final_activation))
 
 
@@ -61,7 +82,15 @@ class DiffeqDeepset(DiffeqConcat):
     Args:
         Same as in `st.net.EquivariantNet`
     """
-    def __init__(self, in_dim, hidden_dims, out_dim, activation='Tanh', final_activation=None, **kwargs):
+    def __init__(
+        self,
+        in_dim: int,
+        hidden_dims: List[int],
+        out_dim: int,
+        activation: str = 'Tanh',
+        final_activation: str = None,
+        **kwargs,
+    ):
         super().__init__(st.net.EquivariantNet(in_dim, hidden_dims, out_dim, activation, final_activation))
 
 
@@ -72,5 +101,13 @@ class DiffeqSelfAttention(DiffeqConcat):
     Args:
         Same as in `st.net.SelfAttention`
     """
-    def __init__(self, in_dim, hidden_dim, out_dim, n_heads=1, mask_diagonal=False, **kwargs):
+    def __init__(
+        self,
+        in_dim: int,
+        hidden_dim: List[int],
+        out_dim: int,
+        n_heads: int = 1,
+        mask_diagonal: bool = False,
+        **kwargs,
+    ):
         super().__init__(st.net.SelfAttention(in_dim, hidden_dim, out_dim, n_heads, mask_diagonal))

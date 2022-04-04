@@ -8,5 +8,3 @@ from .attention import *
 from .made import *
 from .time_net import *
 from .resnet import *
-from .resnet_flow import *
-from .resnet_invertible import *

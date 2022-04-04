@@ -1,9 +1,14 @@
+from typing import Union
+from torchtyping import TensorType
+from numbers import Number
+
 import torch
 import torch.distributions as td
 
 class Uniform(td.Independent):
     """
-    Uniform distribution.
+    Uniform distribution on the d-dimensional space defined by
+    low and high tensors of any shape.
 
     Example:
     >>> dist = stribor.Uniform(0., 1.)
@@ -14,10 +19,15 @@ class Uniform(td.Independent):
     tensor([0.])
 
     Args:
-        low (float or tensor): Low bound (inclusive)
-        high (float or tensor): High bound (exclusive)
+        low (float or tensor): Lower bound (inclusive)
+        high (float or tensor): Upper bound (exclusive)
     """
-    def __init__(self, low, high, reinterpreted_batch_ndims=1, **kwargs):
+    def __init__(
+        self,
+        low: Union[Number, TensorType[...]],
+        high: Union[Number, TensorType[...]],
+        **kwargs,
+    ):
         self.low = low
         self.high = high
 
@@ -27,7 +37,7 @@ class Uniform(td.Independent):
 
 class UnitUniform(Uniform):
     """
-    Unit uniform distribution.
+    Unit `st.Uniform`, i.e., on interval [0, 1). Specify only the dimension.
 
     Example:
     >>> dist = stribor.UnitUniform(2)
@@ -37,6 +47,6 @@ class UnitUniform(Uniform):
     Args:
         dim (int): Dimension of data
     """
-    def __init__(self, dim):
+    def __init__(self, dim: int):
         self.dim = dim
         super().__init__(torch.zeros(self.dim), torch.ones(self.dim))

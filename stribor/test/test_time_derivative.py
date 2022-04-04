@@ -1,6 +1,5 @@
 import pytest
 import torch
-import numpy as np
 import stribor as st
 
 
@@ -21,4 +20,4 @@ def test_time_derivative(input_dim, output_dim, function):
     for _ in range(len(dt_true.shape) // 2):
         dt_true = dt_true.sum(-1)
 
-    assert torch.isclose(dt, dt_true).all()
+    assert torch.allclose(dt, dt_true, atol=1e-4)

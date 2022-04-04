@@ -1,94 +1,184 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.distributions as td
+from abc import ABCMeta, abstractmethod
+from typing import List, Optional, Tuple, Union
+from torchtyping import TensorType
 
-class Flow(nn.Module):
+import torch.nn as nn
+from torch.distributions import Distribution
+
+class Transform(nn.Module, metaclass=ABCMeta):
+    @abstractmethod
+    def forward(
+        self, x: TensorType[..., 'dim'], **kwargs,
+    ) -> TensorType[..., 'dim']:
+        pass
+
+    @abstractmethod
+    def inverse(
+        self, y: TensorType[..., 'dim'], **kwargs,
+    ) -> TensorType[..., 'dim']:
+        pass
+
+    @abstractmethod
+    def log_det_jacobian(
+        self, x: TensorType[..., 'dim'], y: TensorType[..., 'dim'], **kwargs,
+    ) -> TensorType[..., 1]:
+        pass
+
+    def jacobian(
+        self,
+        x: TensorType[..., 'dim'],
+        y: TensorType[..., 'dim'],
+        **kwargs,
+    ) -> TensorType[..., 'dim', 'dim']:
+        raise NotImplementedError
+
+    def forward_and_log_det_jacobian(
+        self, x: TensorType[..., 'dim'], **kwargs,
+    ) -> Tuple[TensorType[..., 'dim'], TensorType[..., 1]]:
+        y = self.forward(x, **kwargs)
+        log_det_jacobian = self.log_det_jacobian(x, y, **kwargs)
+        return y, log_det_jacobian
+
+    def inverse_and_log_det_jacobian(
+        self, y: TensorType[..., 'dim'], **kwargs
+    ) -> Tuple[TensorType[..., 'dim'], TensorType[..., 1]]:
+        x = self.inverse(y, **kwargs)
+        log_det_jacobian = self.log_det_jacobian(x, y, **kwargs)
+        return x, -log_det_jacobian
+
+
+class ElementwiseTransform(Transform):
+    @abstractmethod
+    def log_diag_jacobian(
+        self, x: TensorType[..., 'dim'], y: TensorType[..., 'dim'], **kwargs,
+    ) -> TensorType[..., 'dim']:
+        pass
+
+    def forward_and_log_diag_jacobian(
+        self, x: TensorType[..., 'dim'], **kwargs,
+    ) -> Tuple[TensorType[..., 'dim'], TensorType[..., 'dim']]:
+        y = self.forward(x, **kwargs)
+        log_diag_jacobian = self.log_diag_jacobian(x, y, **kwargs)
+        return y, log_diag_jacobian
+
+    def inverse_and_log_diag_jacobian(
+        self, y: TensorType[..., 'dim'], **kwargs
+    ) -> Tuple[TensorType[..., 'dim'], TensorType[..., 'dim']]:
+        x = self.inverse(y, **kwargs)
+        log_diag_jacobian = self.log_diag_jacobian(x, y, **kwargs)
+        return x, -log_diag_jacobian
+
+
+class NormalizingFlow(Transform):
     """
-    Building both normalizing flows and neural flows.
+    Normalizing flow for density estimation and efficient sampling.
 
     Example:
     >>> import stribor as st
     >>> torch.manual_seed(123)
     >>> dim = 2
-    >>> flow = st.Flow(st.UnitNormal(dim), [st.Affine(dim)])
-    >>> x = torch.rand(1, dim)
-    >>> y, ljd = flow(x)
-    >>> y_inv, ljd_inv = flow.inverse(y)
+    >>> f = st.NormalizingFlow(st.UnitNormal(dim), [st.Affine(dim)])
+    >>> f.log_prob(torch.randn(3, 2))
+    tensor([[-1.7560], [-1.7434], [-2.1792]])
+    >>> f.sample(2)
+    tensor([[-0.5204,  0.4196]])
 
     Args:
-        base_dist (Type[torch.distributions]): Base distribution
-        transforms (List[st.flows]): List of invertible transformations
+        base_dist (torch.distributions.Distribution): Base distribution
+        transforms (Transform): List of invertible transformations
     """
-    def __init__(self, base_dist=None, transforms=[]):
+    def __init__(
+        self,
+        base_dist: Distribution,
+        transforms: List[Transform],
+    ):
         super().__init__()
         self.base_dist = base_dist
         self.transforms = nn.ModuleList(transforms)
 
-    def forward(self, x, latent=None, mask=None, t=None, reverse=False, **kwargs):
-        """
-        Args:
-            x (tensor): Input sampled from base density with shape (..., dim)
-            latent (tensor, optional): Conditional vector with shape (..., latent_dim)
-                Default: None
-            mask (tensor): Masking tensor with shape (..., 1)
-                Default: None
-            t (tensor, optional): Flow time end point. Default: None
-            reverse (bool, optional): Whether to perform an inverse. Default: False
+    def forward(self, x: TensorType[..., 'dim'], **kwargs) -> TensorType[..., 'dim']:
+        for f in self.transforms:
+            x = f(x, **kwargs)
+        return x
 
-        Returns:
-            y (tensor): Output that follows target density (..., dim)
-            log_jac_diag (tensor): Log-Jacobian diagonal (..., dim)
-        """
-        transforms = self.transforms[::-1] if reverse else self.transforms
-        _mask = 1 if mask is None else mask
+    def inverse(self, y: TensorType[..., 'dim'], **kwargs) -> TensorType[..., 'dim']:
+        for f in reversed(self.transforms):
+            y = f.inverse(y, **kwargs)
+        return y
 
-        log_jac_diag = torch.zeros_like(x).to(x)
-        for f in transforms:
-            if reverse:
-                x, ld = f.inverse(x * _mask, latent=latent, mask=mask, t=t, **kwargs)
-            else:
-                x, ld = f.forward(x * _mask, latent=latent, mask=mask, t=t, **kwargs)
-            log_jac_diag += ld * _mask
-        return x, log_jac_diag
+    def forward_and_log_det_jacobian(
+        self, x: TensorType[..., 'dim'], **kwargs,
+    ) -> Tuple[TensorType[..., 'dim'], TensorType[..., 1]]:
+        log_det_jac = 0
+        for f in self.transforms:
+            x, ldj = f.forward_and_log_det_jacobian(x, **kwargs)
+            log_det_jac += ldj
+        return x, log_det_jac
 
-    def inverse(self, y, latent=None, mask=None, t=None, **kwargs):
-        """ Inverse of forward function with the same arguments. """
-        return self.forward(y, latent=latent, mask=mask, t=t, reverse=True, **kwargs)
+    def inverse_and_log_det_jacobian(
+        self, y: TensorType[..., 'dim'], **kwargs,
+    ) -> Tuple[TensorType[..., 'dim'], TensorType[..., 1]]:
+        log_det_jac = 0
+        for f in reversed(self.transforms):
+            y, ldj = f.inverse_and_log_det_jacobian(y, **kwargs)
+            log_det_jac += ldj
+        return y, log_det_jac
 
-    def log_prob(self, x, **kwargs):
-        """
-        Calculates log-probability of a sample.
+    def log_prob(self, y: TensorType[..., 'dim'], **kwargs) -> TensorType[..., 1]:
+        x, log_det_jac = self.inverse_and_log_det_jacobian(y, **kwargs)
+        log_prob = self.base_dist.log_prob(x).unsqueeze(-1) + log_det_jac
+        return log_prob
 
-        Args:
-            x (tensor): Input with shape (..., dim)
-
-        Returns:
-            log_prob (tensor): Log-probability of the input with shape (..., 1)
-        """
-        if self.base_dist is None:
-            raise ValueError('Please define `base_dist` if you need log-probability')
-        x, log_jac_diag = self.inverse(x, **kwargs)
-        log_prob = self.base_dist.log_prob(x) + log_jac_diag.sum(-1)
-        return log_prob.unsqueeze(-1)
-
-    def sample(self, num_samples, latent=None, mask=None, **kwargs):
-        """
-        Transforms samples from the base to the target distribution.
-        Uses reparametrization trick.
-
-        Args:
-            num_samples (tuple or int): Shape of samples
-            latent (tensor): Latent conditioning vector with shape (..., latent_dim)
-
-        Returns:
-            x (tensor): Samples from target distribution with shape (*num_samples, dim)
-        """
-        if self.base_dist is None:
-            raise ValueError('Please define `base_dist` if you need sampling')
+    def sample(
+        self, num_samples: Union[Tuple[int], int], *, rsample: bool = False, **kwargs,
+    ) -> TensorType:
         if isinstance(num_samples, int):
             num_samples = (num_samples,)
 
-        x = self.base_dist.rsample(num_samples)
-        x, log_jac_diag = self.forward(x, **kwargs)
+        if rsample:
+            x = self.base_dist.rsample(num_samples)
+        else:
+            x = self.base_dist.sample(num_samples)
+        x = self.forward(x, **kwargs)
+        return x
+
+    def rsample(self, num_samples: Union[Tuple[int], int], **kwargs) -> TensorType:
+        return self.sample(num_samples, **kwargs)
+
+    def log_det_jacobian(
+        self, x: TensorType[..., 'dim'], y: TensorType[..., 'dim'], **kwargs,
+    ) -> TensorType[..., 1]:
+        _, log_det_jacobian = self.forward_and_log_det_jacobian(x, **kwargs)
+        return log_det_jacobian
+
+
+class NeuralFlow(nn.Module):
+    """
+    Neural flow model.
+    https://arxiv.org/abs/2110.13040
+
+    Example:
+    >>> import stribor as st
+    >>>
+
+    Args:
+        transforms (Transform): List of invertible transformations
+            that satisfy initial condition F(x, t=0)=x.
+    """
+    def __init__(self, transforms: List[Transform]) -> None:
+        super().__init__()
+        self.transforms = nn.ModuleList(transforms)
+
+    def forward(
+        self,
+        x: TensorType[..., 'dim'],
+        t: TensorType[..., 1],
+        t0: Optional[TensorType[..., 1]] = None,
+        **kwargs,
+    ) -> TensorType[..., 'dim']:
+        if t0 is not None:
+            for transform in reversed(self.transforms):
+                x = transform.inverse(x, t=t0, **kwargs)
+        for transform in self.transforms:
+            x = transform(x, t=t, **kwargs)
         return x

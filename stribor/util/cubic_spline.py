@@ -5,7 +5,10 @@ from torch.nn import functional as F
 
 # Code taken from https://github.com/bayesiains/nsf
 
-__all__ = ['cubic_spline', 'unconstrained_cubic_spline']
+__all__ = ['cubic_spline_latent_dim', 'cubic_spline', 'unconstrained_cubic_spline']
+
+def cubic_spline_latent_dim(dim: int, n_bins: int) -> int:
+    return dim * (2 * n_bins + 2)
 
 DEFAULT_MIN_BIN_WIDTH = 1e-2
 DEFAULT_MIN_BIN_HEIGHT = 1e-2

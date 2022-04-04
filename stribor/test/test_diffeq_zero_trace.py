@@ -56,9 +56,9 @@ def test_attention_zero_trace(input_dim, latent_dim, n_heads):
     t = torch.Tensor([1])
     x = torch.randn(*input_dim)
 
-    y, jac = model(t, x)
+    y, div = model(t, x)
     f = lambda t, x: model(t, x)[0]
-    jac_exact = st.util.divergence_from_jacobian(f, (t, x))[1]
+    _, div_exact = st.util.divergence_from_jacobian(f, (t, x))
 
-    assert jac_exact.sum() == 0
-    assert torch.isclose(jac, jac_exact).all()
+    assert div_exact.sum() == 0
+    assert torch.allclose(div, div_exact)

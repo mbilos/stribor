@@ -1,128 +1,186 @@
+from typing import Union, Optional, Tuple
+from torchtyping import TensorType
+from numbers import Number
+
 import torch
 import torch.nn as nn
 
-class Affine(nn.Module):
+from stribor import Transform, ElementwiseTransform
+
+
+class Affine(ElementwiseTransform):
     """
-    Affine flow.
-    `y = a * x + b`
+    Affine flow `y = a * x + b` where `a` and `b` are vectors and operations
+    are applied elementwise.
 
     Example:
     >>> torch.manual_seed(123)
     >>> dim, latent_dim = 2, 50
-    >>> f = stribor.Affine(dim, stribor.net.MLP(latent_dim, [64, 64], 2 * dim))
+    >>> f = st.Affine(dim, st.net.MLP(latent_dim, [64, 64], 2 * dim))
     >>> f(torch.ones(1, dim), latent=torch.ones(1, latent_dim))
     (tensor([[0.7575, 0.9410]], tensor([[-0.1745, -0.1350]])
 
     Args:
         dim (int): Dimension of data
-        latent_net (Type[nn.Module], optional): Neural network that takes `latent`
-            and outputs transformation parameters of size `[2*dim]`. Default: None
+        latent_net (nn.Module): Neural network that maps `[..., latent]` to `[..., 2 * dim]`
+        scale (tensor): Scaling coefficient `a`
+        shift (tensor): Shift coefficient `b`
     """
-    def __init__(self, dim, latent_net=None, **kwargs):
+    def __init__(
+        self,
+        dim: int,
+        *,
+        latent_net: Optional[nn.Module] = None,
+        scale: Union[Number, TensorType['dim']] = None,
+        shift: Union[Number, TensorType['dim']] = None,
+        **kwargs,
+    ):
         super().__init__()
 
         self.latent_net = latent_net
 
         if latent_net is None:
-            lim = (3 / dim)**0.5 # Xavier uniform
-            self.log_scale = nn.Parameter(torch.Tensor(1, dim).uniform_(-lim, lim))
-            self.shift = nn.Parameter(torch.Tensor(1, dim).uniform_(-lim, lim))
+            if scale is None:
+                self.log_scale = nn.Parameter(torch.empty(1, dim))
+                self.shift = nn.Parameter(torch.empty(1, dim))
+                nn.init.xavier_uniform_(self.log_scale)
+                nn.init.xavier_uniform_(self.shift)
+            else:
+                if isinstance(scale, Number):
+                    scale = torch.Tensor([scale])
+                    shift = torch.Tensor([shift])
 
-    def get_params(self, latent):
+                assert torch.all(scale > 0), '`scale` mush have positive values'
+                self.log_scale = scale.log()
+                self.shift = shift
+
+    def _get_params(
+        self,
+        latent: Optional[TensorType[..., 'latent']],
+    ) -> Tuple[TensorType[..., 'dim'], TensorType[..., 'dim']]:
         if self.latent_net is None:
             return self.log_scale, self.shift
         else:
             log_scale, shift = self.latent_net(latent).chunk(2, dim=-1)
             return log_scale, shift
 
-    def forward(self, x, latent=None, **kwargs):
-        log_scale, shift = self.get_params(latent)
-        y = x * torch.exp(log_scale) + shift
-        return y, log_scale.expand_as(y)
+    def forward(
+        self,
+        x: TensorType[..., 'dim'],
+        latent: Optional[TensorType[..., 'latent']] = None,
+        **kwargs,
+    ) -> TensorType[..., 'dim']:
+        y, _ = self.forward_and_log_det_jacobian(x, latent)
+        return y
 
-    def inverse(self, y, latent=None, **kwargs):
-        log_scale, shift = self.get_params(latent)
-        x = (y - shift) * torch.exp(-log_scale)
-        return x, -log_scale.expand_as(x)
+    def inverse(
+        self,
+        y: TensorType[..., 'dim'],
+        latent: Optional[TensorType[..., 'latent']] = None,
+        **kwargs,
+    ) -> TensorType[..., 'dim']:
+        x, _ = self.inverse_and_log_det_jacobian(y, latent)
+        return x
+
+    def log_det_jacobian(
+        self,
+        x: TensorType[..., 'dim'],
+        y: Optional[TensorType[..., 'dim']] = None,
+        latent: Optional[TensorType[..., 'latent']] = None,
+        **kwargs,
+    ) -> TensorType[..., 1]:
+        _, log_det_jacobian = self.forward_and_log_det_jacobian(x, latent)
+        return log_det_jacobian
+
+    def forward_and_log_det_jacobian(self,
+        x: TensorType[..., 'dim'],
+        latent: Optional[TensorType[..., 'latent']] = None,
+        *,
+        reverse: bool = False,
+        **kwargs,
+    ) -> Tuple[TensorType[..., 'dim'], TensorType[..., 1]]:
+        log_scale, shift = self._get_params(latent)
+        if reverse:
+            y = (x - shift) * torch.exp(-log_scale)
+        else:
+            y = x * torch.exp(log_scale) + shift
+        return y, log_scale.expand_as(x).sum(-1, keepdim=True)
+
+    def inverse_and_log_det_jacobian(self, y, latent=None, **kwargs):
+        x, log_det_jacobian = self.forward_and_log_det_jacobian(y, latent, reverse=True)
+        return x, -log_det_jacobian
+
+    def log_diag_jacobian(
+        self,
+        x: TensorType[..., 'dim'],
+        y: Optional[TensorType[..., 'dim']] = None,
+        latent: Optional[TensorType[..., 'latent']] = None,
+        **kwargs,
+    ) -> TensorType[..., 'dim']:
+        log_scale, _ = self._get_params(latent)
+        return log_scale.expand_as(x)
 
 
-class AffineFixed(nn.Module):
+class AffineLU(Transform):
     """
-    Fixed affine transformation with predefined (non-learnable) parameters.
-
-    Example:
-    >>> f = stribor.AffineFixed(torch.tensor([2.]), torch.tensor([3.]))
-    >>> f(torch.tensor([1, 2]))
-    (tensor([5., 7.]), tensor([0.6931, 0.6931]))
-    >>> f.inverse(torch.tensor([5, 7]))
-    (tensor([1., 2.]), tensor([-0.6931, -0.6931]))
+    Invertible linear layer `Wx+b` where `W=LU` is LU factorized.
 
     Args:
-        scale (tensor): Scaling factor, all positive values
-        shift (tensor): Shifting factor
+        dim: Dimension of input data
     """
-    def __init__(self, scale, shift, **kwargs):
+    def __init__(self, dim: int, **kwargs):
         super().__init__()
 
-        self.scale = scale
-        self.shift = shift
+        self.diag_ones = torch.eye(dim)
 
-        assert (self.scale > 0).all(), '`scale` mush have positive values'
-
-        self.log_scale = self.scale.log()
-
-    def forward(self, x, **kwargs):
-        y = self.scale * x + self.shift
-        return y, self.log_scale.expand_as(x)
-
-    def inverse(self, y, **kwargs):
-        x = (y - self.shift) / self.scale
-        return x, -self.log_scale.expand_as(x)
-
-
-class AffinePLU(nn.Module):
-    """
-    Invertible linear layer `Wx+b` where `W=PLU` is PLU factorized.
-
-    Args:
-        dim: Dimension of input data.
-    """
-    def __init__(self, dim, latent_net=None, **kwargs):
-        super().__init__()
-
-        self.P = torch.eye(dim)[torch.randperm(dim)]
         self.weight = nn.Parameter(torch.empty(dim, dim))
         self.log_diag = nn.Parameter(torch.empty(1, dim))
         self.bias = nn.Parameter(torch.empty(1, dim))
+        self.reset_parameters()
+
+    def reset_parameters(self):
         nn.init.xavier_uniform_(self.weight)
         nn.init.xavier_uniform_(self.log_diag)
         nn.init.xavier_uniform_(self.bias)
 
-    def get_LU(self):
-        eye = torch.eye(self.weight.shape[1])
-        L = torch.tril(self.weight, -1) + eye
-        U = torch.triu(self.weight, 1) + eye * self.log_diag.exp()
-        return L, U
+    @property
+    def L(self) -> TensorType['dim', 'dim']:
+        return torch.tril(self.weight, -1) + self.diag_ones
 
-    def forward(self, x, **kwargs):
-        """ Input: x (..., dim) """
-        L, U = self.get_LU()
-        y = (self.P @ (L @ (U @ x.unsqueeze(-1)))).squeeze(-1) + self.bias
-        ljd = self.log_diag.expand_as(x)
-        return y, ljd
+    @property
+    def U(self) -> TensorType['dim', 'dim']:
+        return torch.triu(self.weight, 1) + self.diag_ones * self.log_diag.exp()
 
-    def inverse(self, y, **kwargs):
-        L, U = self.get_LU()
-        y = torch.triangular_solve(self.P.T @ (y - self.bias).unsqueeze(-1), L, upper=False)[0]
-        x = torch.triangular_solve(y, U, upper=True)[0].squeeze(-1)
-        ljd = -self.log_diag.expand_as(x)
-        return x, ljd
+    def forward(self, x: TensorType[..., 'dim'], **kwargs) -> TensorType[..., 'dim']:
+        return x @ (self.L @ self.U) + self.bias
+
+    def inverse(self, y: TensorType[..., 'dim'], **kwargs) -> TensorType[..., 'dim']:
+        x = y - self.bias
+        x = torch.linalg.solve_triangular(self.U, x, upper=True, left=False)
+        x = torch.linalg.solve_triangular(self.L, x, upper=False, left=False)
+        return x
+
+    def log_det_jacobian(
+        self,
+        x: TensorType[..., 'dim'],
+        y: Optional[TensorType[..., 'dim']] = None,
+        **kwargs,
+    ) -> TensorType[..., 1]:
+        return self.log_diag.expand_as(x).sum(-1, keepdim=True)
+
+    def jacobian(
+        self,
+        x: TensorType[..., 'dim'],
+        y: TensorType[..., 'dim'],
+        **kwargs,
+    ) -> TensorType[..., 'dim', 'dim']:
+        return ((self.L @ self.U).T).expand(*x.shape[:-1], -1, -1)
 
 
-class MatrixExponential(nn.Module):
+class MatrixExponential(Transform):
     """
-    Matrix exponential transformation `y = exp(W*t)x`.
-    Corresponds to a solution of a linear ODE `dx/dt = Wx`.
+    Matrix exponential transformation `y = exp(W * t) @ x`.
+    Corresponds to a solution of the linear ODE `dx/dt = W @ x`.
 
     Example:
     >>> torch.manual_seed(123)
@@ -140,27 +198,62 @@ class MatrixExponential(nn.Module):
         super().__init__()
 
         self.weight = nn.Parameter(torch.empty(dim, dim))
+        self.reset_parameters()
+
+    def reset_parameters(self):
         nn.init.xavier_uniform_(self.weight)
 
-    def forward(self, x, t=1., reverse=False, **kwargs):
-        """
-        Args:
-            x (tensor): Input with shape (..., dim)
-            t (tensor or float, optional): Time with shape (..., 1). Default: 1.
-            reverse (bool, optional): Whether to do inverse. Default: False
-        """
+    def get_time(self, t, shape):
+        if isinstance(t, Number):
+            t = torch.ones(*shape[:-1], 1) * t
+        t = t.unsqueeze(-1)
+        return t
+
+    def forward(
+        self,
+        x: TensorType[..., 'dim'],
+        t: Union[Number, TensorType[..., 1]] = 1.0,
+        *,
+        reverse: bool = False,
+        **kwargs
+    ) -> TensorType[..., 'dim']:
         if reverse:
             t = -t
 
-        if isinstance(t, float):
-            t = torch.ones(*x.shape[:-1], 1) * t
-        t = t.unsqueeze(-1)
+        t = self.get_time(t, x.shape)
 
         W = torch.matrix_exp(self.weight * t)
-        y = (W @ x.unsqueeze(-1)).squeeze(-1)
+        y = W @ x.unsqueeze(-1)
+        y = y.squeeze(-1)
 
-        ljd = (self.weight * t).diagonal(dim1=-2, dim2=-1).expand_as(x)
-        return y, ljd
+        return y
 
-    def inverse(self, y, t=1., **kwargs):
+    def inverse(
+        self,
+        y: TensorType[..., 'dim'],
+        t: Union[Number, TensorType[..., 1]] = 1.0,
+        **kwargs,
+    ) -> TensorType[..., 'dim']:
         return self.forward(y, t=t, reverse=True)
+
+    def log_det_jacobian(
+        self,
+        x: TensorType[..., 'dim'],
+        y: Optional[TensorType[..., 'dim']] = None,
+        t: TensorType[..., 'dim'] = 1.0,
+        **kwargs,
+    ) -> TensorType[..., 1]:
+        t = self.get_time(t, x.shape)
+        ldj = (self.weight * t).diagonal(dim1=-2, dim2=-1)
+        return ldj.expand_as(x).sum(-1, keepdim=True)
+
+    def jacobian(
+        self,
+        x: TensorType[..., 'dim'],
+        y: TensorType[..., 'dim'],
+        t: TensorType[..., 'dim'] = 1.0,
+        **kwargs,
+    ) -> TensorType[..., 'dim', 'dim']:
+        t = self.get_time(t, x.shape)
+        W = torch.matrix_exp(self.weight * t)
+        return W.expand(*x.shape[:-1], -1, -1)

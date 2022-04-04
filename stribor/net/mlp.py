@@ -1,4 +1,6 @@
-import torch
+from typing import Callable, List
+from torchtyping import TensorType
+
 import torch.nn as nn
 
 class MLP(nn.Module):
@@ -18,15 +20,23 @@ class MLP(nn.Module):
         activation (str, optional): Activation function from `torch.nn`.
             Default: 'Tanh'
         final_activation (str, optional): Last activation. Default: None
-        wrapper_func (callable, optional): Wrapper function for `nn.Linear`,
+        nn_linear_wrapper_func (callable, optional): Wrapper function for `nn.Linear`,
             e.g. st.util.spectral_norm. Default: None
     """
-    def __init__(self, in_dim, hidden_dims, out_dim, activation='Tanh',
-                 final_activation=None, wrapper_func=None, **kwargs):
+    def __init__(
+        self,
+        in_dim: int,
+        hidden_dims: List[int],
+        out_dim: int,
+        activation: str = 'Tanh',
+        final_activation: str = None,
+        nn_linear_wrapper_func: Callable = None,
+        **kwargs,
+    ):
         super().__init__()
 
-        if not wrapper_func:
-            wrapper_func = lambda x: x
+        if not nn_linear_wrapper_func:
+            nn_linear_wrapper_func = lambda x: x
 
         hidden_dims = hidden_dims[:]
         hidden_dims.append(out_dim)
@@ -34,7 +44,7 @@ class MLP(nn.Module):
 
         for i in range(len(hidden_dims) - 1):
             layers.append(getattr(nn, activation)())
-            layers.append(wrapper_func(nn.Linear(hidden_dims[i], hidden_dims[i+1])))
+            layers.append(nn_linear_wrapper_func(nn.Linear(hidden_dims[i], hidden_dims[i+1])))
         layers[-1].bias.data.fill_(0.0)
 
         if final_activation is not None:
@@ -42,13 +52,9 @@ class MLP(nn.Module):
 
         self.net = nn.Sequential(*layers)
 
-    def forward(self, x, **kwargs):
-        """
-        Args:
-            x (tensor): Input with shape (..., in_dim)
-
-        Returns:
-            y (tensor): Output with shape (..., out_dim)
-        """
-
+    def forward(
+        self,
+        x: TensorType[..., 'dim'],
+        **kwargs,
+    ) -> TensorType[..., 'out']:
         return self.net(x)

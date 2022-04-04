@@ -4,74 +4,66 @@ import numpy as np
 import stribor as st
 from stribor.test.base import *
 
-#########################
-# Affine transformation #
-#########################
-def build_affine(model, dim, num_layers, latent_dim):
-    base_dist = st.Normal(torch.zeros(dim), torch.ones(dim))
-    transforms = []
-    for _ in range(num_layers):
-        # Only Affine has latent_net implemented
-        net = None if latent_dim is None else st.net.MLP(latent_dim, [64], 2*dim)
-        transforms.append(getattr(st, model)(dim, latent_net=net))
-    return st.Flow(base_dist, transforms)
 
 @pytest.mark.parametrize('input_shape', [(1, 1), (2, 10), (10, 2), (7, 4, 5)])
-@pytest.mark.parametrize('num_layers', [1, 4])
-@pytest.mark.parametrize('latent_dim', [None, 1, 32])
-@pytest.mark.parametrize('model', ['Affine', 'AffinePLU'])
-def test_affine(input_shape, num_layers, latent_dim, model):
+@pytest.mark.parametrize('scalar_param', [True, False])
+def test_fixed_affine(input_shape, scalar_param):
     torch.manual_seed(123)
+    np.random.seed(123)
 
-    model = build_affine(model, input_shape[-1], num_layers, latent_dim)
+    dim = input_shape[-1]
 
     x = torch.randn(*input_shape)
-    latent = torch.randn(*x.shape[:-1], latent_dim) if latent_dim else None
 
-    y, log_jac_y = model.forward(x, latent=latent)
-    x_, log_jac_x = model.inverse(y, latent=latent)
+    scale = np.random.rand() if scalar_param else torch.rand(dim)
+    shift = np.random.normal() if scalar_param else torch.randn(dim)
 
-    check_inverse(x, x_)
-    check_jacobian(log_jac_x, log_jac_y)
-    check_one_training_step(model, x, latent=latent)
-    if latent is None:
-        check_log_jacobian_determinant(model, x)
+    f = st.Affine(dim, scale=scale, shift=shift)
 
-@pytest.mark.parametrize('model_name', ['Affine', 'AffinePLU'])
-def test_affine_auc(model_name):
-    torch.manual_seed(123)
-
-    for dim, check in zip([1, 2], [check_area_under_pdf_1D, check_area_under_pdf_2D]):
-        model = build_affine(model_name, dim, num_layers=1, latent_dim=None)
-        check(model)
+    check_inverse_transform(f, x)
+    check_log_jacobian_determinant(f, x)
 
 
-######################
-# Matrix exponential #
-######################
 @pytest.mark.parametrize('input_shape', [(1, 1), (2, 10), (10, 2), (7, 4, 5)])
-@pytest.mark.parametrize('num_layers', [1, 4])
-@pytest.mark.parametrize('latent_dim', [None, 1, 32])
-@pytest.mark.parametrize('scalar_time', [True, False])
-def test_matrix_exponential(input_shape, num_layers, latent_dim, scalar_time):
+@pytest.mark.parametrize('latent_dim', [1, 13])
+def test_latent_affine(input_shape, latent_dim):
     torch.manual_seed(123)
-
-    model = build_affine('MatrixExponential', input_shape[-1], num_layers, latent_dim)
+    dim = input_shape[-1]
 
     x = torch.randn(*input_shape)
-    latent = torch.randn(*x.shape[:-1], latent_dim) if latent_dim else None
-    t = 1.2 if scalar_time else torch.rand(*x.shape[:-1], 1)
+    latent = torch.randn(*input_shape[:-1], latent_dim)
 
-    y, log_jac_y = model.forward(x, latent=latent, t=t)
-    x_, log_jac_x = model.inverse(y, latent=latent, t=t)
+    f = st.Affine(dim, latent_net=st.net.MLP(latent_dim, [32], 2 * dim))
 
-    check_inverse(x, x_)
-    check_jacobian(log_jac_x, log_jac_y)
-    check_one_training_step(model, x, latent=latent, t=t)
+    check_inverse_transform(f, x, latent=latent)
+    check_log_jacobian_determinant(f, x, latent=latent)
+    check_gradients_not_nan(f, x, latent=latent)
 
-def test_matrix_exponential_auc():
+
+
+@pytest.mark.parametrize('input_shape', [(1, 1), (2, 10), (10, 2), (7, 4, 5)])
+def test_lu_affine(input_shape):
     torch.manual_seed(123)
+    dim = input_shape[-1]
 
-    for dim, check in zip([1, 2], [check_area_under_pdf_1D, check_area_under_pdf_2D]):
-        model = build_affine('MatrixExponential', dim, num_layers=1, latent_dim=None)
-        check(model, input_time=True)
+    x = torch.randn(*input_shape)
+
+    f = st.AffineLU(dim)
+
+    check_inverse_transform(f, x)
+    check_log_jacobian_determinant(f, x)
+    check_gradients_not_nan(f, x)
+
+
+@pytest.mark.parametrize('input_shape', [(1, 1), (2, 10), (10, 2), (7, 4, 5)])
+def test_matrix_exponential(input_shape):
+    torch.manual_seed(123)
+    dim = input_shape[-1]
+
+    x = torch.randn(*input_shape)
+
+    f = st.MatrixExponential(dim)
+
+    check_inverse_transform(f, x)
+    check_log_jacobian_determinant(f, x)
+    check_gradients_not_nan(f, x)

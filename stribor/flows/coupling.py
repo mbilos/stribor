@@ -1,14 +1,17 @@
-import stribor as st
+from typing import Optional, Tuple
+from torchtyping import TensorType
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
+import stribor as st
+from stribor import Transform, ElementwiseTransform
 
-class Coupling(nn.Module):
+class Coupling(Transform):
     """
-    Coupling transformation via elementwise flows. If `dim = 1`, set `mask = 'none'`.
-    Splits data into 2 parts based on a mask. One part generates parameters of the flow
-    that will transform the rest. Efficient (identical) computation in both directions.
+    Coupling transformation via elementwise transforms. If `dim = 1`, set `mask` to `'none'`.
+    Splits data into 2 parts based on a mask. One part generates parameters of the transform
+    that will transform the rest. Efficient computation in both directions.
 
     Example:
     >>> import stribor as st
@@ -22,50 +25,77 @@ class Coupling(nn.Module):
     tensor([[0.9165, 0.7125]], tensor([[0.6281, -0.0000]]
 
     Args:
-        flow (Type[stribor.flows]): Elementwise flow with `latent_net` property.
-            Latent network takes input of size `dim` and returns the parameters of the flow.
-        mask (str): Mask name from `stribor.util.mask`. Options: `none`,
-            `ordered_right_half` (right transforms left), `ordered_left_half`, `random_half`,
+        transform (Transform): Elementwise transform with `latent_net` property.
+            Latent network takes input of size `dim` and returns the parameters of the transform.
+        mask (str): Mask name from `stribor.util.mask`.
+            Options: `none`, `ordered_right_half` (right transforms left), `ordered_left_half`, `random_half`,
             `parity_even` (even indices transform odd), `parity_odd`.
-        set_data (bool, optional): Whether data has shape (..., N, dim). Default: False
+        set_data (bool): Whether data has shape (..., N, dim) and we want to be permutation invariant. Default: False
     """
-    def __init__(self, flow, mask, set_data=False, **kwargs):
+    def __init__(
+        self,
+        transform: ElementwiseTransform,
+        mask: str,
+        set_data: bool = False,
+        **kwargs,
+    ):
         super().__init__()
 
-        self.flow = flow
+        self.transform = transform
         self.mask_func = st.util.mask.get_mask(mask) # Initializes mask generator
         self.set_data = set_data
 
-    def get_mask(self, x):
+    def _get_mask(self, x):
         if self.set_data:
             *rest, N, D = x.shape
             return self.mask_func(N).unsqueeze(-1).expand(*rest, N, D).to(x)
         else:
             return self.mask_func(x.shape[-1]).expand_as(x).to(x)
 
-    def forward(self, x, latent=None, reverse=False, **kwargs):
-        mask = self.get_mask(x)
-
+    def _get_conditioning(
+        self,
+        x: TensorType[..., 'dim'],
+        mask: TensorType[..., 'dim'],
+        latent: Optional[TensorType[..., 'latent']] = None,
+    ) -> TensorType[..., 'out']:
         z = x * mask
         if x.shape[-1] == 1:
             z = z * 0
         if latent is not None:
             z = torch.cat([z, latent], -1)
 
-        if reverse:
-            y, ljd = self.flow.inverse(x, latent=z, **kwargs)
-        else:
-            y, ljd = self.flow.forward(x, latent=z, **kwargs)
+        return z
 
-        y = y * (1 - mask) + x * mask
-        ljd = ljd * (1 - mask)
-        return y, ljd
+    def forward(self, x, latent=None, reverse=False, **kwargs):
+        mask = self._get_mask(x)
+        z = self._get_conditioning(x, mask, latent)
+
+        if reverse:
+            y_ = self.transform.inverse(x, latent=z, **kwargs)
+        else:
+            y_ = self.transform(x, latent=z, **kwargs)
+
+        y = y_ * (1 - mask) + x * mask
+        return y
 
     def inverse(self, y, latent=None, **kwargs):
-        return self.forward(y, latent=latent, reverse=True, **kwargs)
+        return self.forward(y, latent, reverse=True)
+
+    def log_det_jacobian(
+        self,
+        x: TensorType[..., 'dim'],
+        y: Optional[TensorType[..., 'dim']] = None,
+        latent: Optional[TensorType[..., 'latent']] = None,
+        **kwargs,
+    ) -> TensorType[..., 1]:
+        mask = self._get_mask(x)
+        z = self._get_conditioning(x, mask, latent)
+
+        log_diag_jacobian = self.transform.log_diag_jacobian(x, y, latent=z, **kwargs)
+        return (log_diag_jacobian * (1 - mask)).sum(-1, keepdim=True)
 
 
-class ContinuousAffineCoupling(nn.Module):
+class ContinuousAffineCoupling(Transform):
     """
     Continuous affine coupling layer. If `dim = 1`, set `mask = 'none'`.
     Similar to `Coupling` but applies only an affine transformation
@@ -80,51 +110,104 @@ class ContinuousAffineCoupling(nn.Module):
     (tensor([[0.8188, 0.4037]], tensor([[-0.0000, -0.1784]])
 
     Args:
-        latent_net (Type[nn.Module]): Inputs concatenation of `x` and `t` (and optionally
+        latent_net (nn.Module): Inputs concatenation of `x` and `t` (and optionally
             `latent`) and outputs affine transformation parameters (size `2 * dim`)
-        time_net (Type[stribor.net.time_net]): Time embedding with the same output
+        time_net (stribor.net.time_net): Time embedding with the same output
             size as `latent_net`
         mask (str): Mask name from `stribor.util.mask`
+            Options: `none`, `ordered_right_half` (right transforms left), `ordered_left_half`, `random_half`,
+            `parity_even` (even indices transform odd), `parity_odd`.
+        concatenate_time (bool): Whether to add time to input.
     """
-    def __init__(self, latent_net, time_net, mask, **kwargs):
+    def __init__(
+        self,
+        latent_net: nn.Module,
+        time_net: nn.Module,
+        mask: str,
+        concatenate_time: Optional[bool] = True,
+        **kwargs,
+    ):
         super().__init__()
 
         self.latent_net = latent_net
-        self.mask_func = st.util.mask.get_mask(mask) # Initializes mask generator
+        self.mask_func = st.util.mask.get_mask(mask)
         self.time_net = time_net
+        self.concatenate_time = concatenate_time
 
-    def get_mask(self, x):
+    def _get_mask(self, x):
         return self.mask_func(x.shape[-1]).expand_as(x).to(x)
 
-    def forward(self, x, t, latent=None, reverse=False, **kwargs):
-        """
-        Args:
-            x (tensor): Input with shape (..., dim)
-            t (tensor): Time input with shape (..., 1)
-            latent (tensor): Conditioning vector with shape (..., latent_dim)
-            reverse (bool, optional): Whether to calculate inverse. Default: False
-
-        Returns:
-            y (tensor): Transformed input with shape (..., dim)
-            ljd (tensor): Log-Jacobian diagonal with shape (..., dim)
-        """
-        mask = self.get_mask(x)
-        z = torch.cat([x * 0 if x.shape[-1] == 1 else x * mask, t], -1)
+    def _get_conditioning(
+        self,
+        x: TensorType[..., 'dim'],
+        t: TensorType[..., 1],
+        mask: TensorType[..., 'dim'],
+        latent: Optional[TensorType[..., 'latent']] = None,
+    ) -> TensorType[..., 'out']:
+        z = x * mask
+        if x.shape[-1] == 1:
+            z = z * 0
         if latent is not None:
             z = torch.cat([z, latent], -1)
+        if self.concatenate_time:
+            z = torch.cat([z, t], -1)
+        return z
 
-        scale, shift = self.latent_net(z).chunk(2, dim=-1)
-        t_scale, t_shift = self.time_net(t).chunk(2, dim=-1)
+    def forward(
+        self,
+        x: TensorType[..., 'dim'],
+        t: TensorType[..., 1],
+        latent: Optional[TensorType[..., 'latent']] = None,
+        **kwargs,
+    ) -> TensorType[..., 'dim']:
+        y, _ = self.forward_and_log_det_jacobian(x, t, latent)
+        return y
+
+    def inverse(
+        self,
+        y: TensorType[..., 'dim'],
+        t: TensorType[..., 1],
+        latent: Optional[TensorType[..., 'latent']] = None,
+        **kwargs,
+    ) -> TensorType[..., 'dim']:
+        x, _ = self.inverse_and_log_det_jacobian(y, t, latent)
+        return x
+
+    def log_det_jacobian(
+        self,
+        x: TensorType[..., 'dim'],
+        y: Optional[TensorType[..., 'dim']],
+        *,
+        t: TensorType[..., 1],
+        latent: Optional[TensorType[..., 'latent']] = None,
+        **kwargs,
+    ) -> TensorType[..., 1]:
+        _, log_det_jacobian = self.forward_and_log_det_jacobian(x, t, latent)
+        return log_det_jacobian
+
+    def forward_and_log_det_jacobian(self,
+        x: TensorType[..., 'dim'],
+        t: TensorType[..., 1],
+        latent: Optional[TensorType[..., 'latent']] = None,
+        *,
+        reverse: bool = False,
+        **kwargs,
+    ) -> Tuple[TensorType[..., 'dim'], TensorType[..., 1]]:
+        mask = self._get_mask(x)
+        z = self._get_conditioning(x, t, mask, latent)
+
+        log_scale, shift = self.latent_net(z).chunk(2, dim=-1)
+        t_log_scale, t_shift = self.time_net(t).chunk(2, dim=-1)
 
         if reverse:
-            y = (x - shift * t_shift) * torch.exp(-scale * t_scale)
-            ljd = -scale * t_scale * (1 - mask)
+            y = (x - shift * t_shift) * torch.exp(-log_scale * t_log_scale)
         else:
-            y = x * torch.exp(scale * t_scale) + shift * t_shift
-            ljd = scale * t_scale * (1 - mask)
+            y = x * torch.exp(log_scale * t_log_scale) + shift * t_shift
+        log_diag_jacobian = log_scale * t_log_scale * (1 - mask)
         y = y * (1 - mask) + x * mask
 
-        return y, ljd
+        return y, log_diag_jacobian.sum(-1, keepdim=True)
 
-    def inverse(self, y, t, latent=None, **kwargs):
-        return self.forward(y, t=t, latent=latent, reverse=True)
+    def inverse_and_log_det_jacobian(self, y, t, latent=None, **kwargs):
+        x, log_det_jacobian = self.forward_and_log_det_jacobian(y, t, latent, reverse=True)
+        return x, -log_det_jacobian

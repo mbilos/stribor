@@ -1,41 +1,56 @@
+from torchtyping import TensorType
+
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 
-# Code adapted from torch.distributions.transforms
+from stribor import ElementwiseTransform
 
 
-class Sigmoid(nn.Module):
+class Sigmoid(ElementwiseTransform):
     """
     Sigmoid transformation.
+
+    Code adapted from torch.distributions.transforms
     """
     def __init__(self, **kwargs):
         super().__init__()
 
-    def forward(self, x, **kwargs):
+    def forward(
+        self, x: TensorType[..., 'dim'], **kwargs,
+    ) -> TensorType[..., 'dim']:
         finfo = torch.finfo(x.dtype)
         y = torch.clamp(torch.sigmoid(x), min=finfo.tiny, max=1. - finfo.eps)
-        ljd = -F.softplus(-x) - F.softplus(x)
-        return y, ljd
+        return y
 
-    def inverse(self, y, **kwargs):
+    def inverse(
+        self, y: TensorType[..., 'dim'], **kwargs,
+    ) -> TensorType[..., 'dim']:
         finfo = torch.finfo(y.dtype)
         y = y.clamp(min=finfo.tiny, max=1.0 - finfo.eps)
-
         x = y.log() - (-y).log1p()
-        ljd = -y.log() - (-y).log1p()
-        return x, ljd
+        return x
 
-class Logit(nn.Module):
+    def log_det_jacobian(
+        self, x: TensorType[..., 'dim'], y: TensorType[..., 'dim'], **kwargs,
+    ) -> TensorType[..., 1]:
+        return self.log_diag_jacobian(x, y, **kwargs).sum(-1, keepdim=True)
+
+    def log_diag_jacobian(
+        self, x: TensorType[..., 'dim'], y: TensorType[..., 'dim'], **kwargs,
+    ) -> TensorType[..., 'dim']:
+        return -F.softplus(-x) - F.softplus(x)
+
+class Logit(Sigmoid):
     """
     Logit transformation. Inverse of sigmoid.
     """
-    def __init__(self, **kwargs):
-        super().__init__()
-        self.base_flow = Sigmoid(**kwargs)
-
     def forward(self, x, **kwargs):
-        return self.base_flow.inverse(x)
+        return super().inverse(x, **kwargs)
 
-    def inverse(self, x, **kwargs):
-        return self.base_flow.forward(x)
+    def inverse(self, y, **kwargs):
+        return super().forward(y, **kwargs)
+
+    def log_diag_jacobian(
+        self, x: TensorType[..., 'dim'], y: TensorType[..., 'dim'], **kwargs,
+    ) -> TensorType[..., 'dim']:
+        return -super().log_diag_jacobian(y, x) # Flip sign and order

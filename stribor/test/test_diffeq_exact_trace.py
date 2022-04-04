@@ -53,8 +53,8 @@ def check_if_model_is_implemented_correctly(input_shape, model, latent_dim):
         jac_exact = st.util.divergence_from_jacobian(f, (t_, x_, latent_))[1]
 
     # Check if forward pass and jacobian are correct
-    assert torch.isclose(y, y_exact).all(), 'Output is incorrect'
-    assert torch.isclose(jac, jac_exact).all(), 'Jacobian is incorrect'
+    assert torch.allclose(y, y_exact), 'Output is incorrect'
+    assert torch.allclose(jac, jac_exact), 'Jacobian is incorrect'
 
     # Simulate loss and test if backward step works
     loss1 = y.mean()
@@ -64,7 +64,7 @@ def check_if_model_is_implemented_correctly(input_shape, model, latent_dim):
     loss2.backward()
 
     # Check if losses for both models are exactly the same
-    assert all([torch.isclose(g1.grad, g2.grad).all() for g1, g2 in zip(model.parameters(), model_exact.parameters())]), \
+    assert all([torch.allclose(g1.grad, g2.grad) for g1, g2 in zip(model.parameters(), model_exact.parameters())]), \
         'Gradients for two networks are not the same'
 
 @pytest.mark.parametrize('input_shape', [(10, 2), (1, 1, 3), (3, 7, 8), (2, 3, 5, 2)])

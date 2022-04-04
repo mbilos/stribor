@@ -1,5 +1,7 @@
+from typing import List
+from torchtyping import TensorType
+
 import stribor as st
-import torch
 import torch.nn as nn
 
 class ResNetBlock(nn.Module):
@@ -33,12 +35,20 @@ class ResNet(nn.Module):
             Default: 'ReLU'
         final_activation (str, optional): Last activation. Default: None
     """
-    def __init__(self, dim, hidden_dims, num_layers, activation='ReLU', final_activation=None, **kwargs):
+    def __init__(
+        self,
+        dim: int,
+        hidden_dims: List[int],
+        num_layers: int,
+        activation: str = 'ReLU',
+        final_activation: str = None,
+        **kwargs,
+    ):
         super().__init__()
         layers = []
         for _ in range(num_layers):
             layers.append(ResNetBlock(dim, hidden_dims, activation, final_activation))
         self.net = nn.Sequential(*layers)
 
-    def forward(self, x):
+    def forward(self, x: TensorType[..., 'dim'], **kwargs) -> TensorType[..., 'dim']:
         return self.net(x)

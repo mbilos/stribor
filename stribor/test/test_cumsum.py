@@ -1,35 +1,45 @@
 import torch
 import pytest
-import numpy as np
 import stribor as st
-from stribor.test.base import check_inverse, check_jacobian
+from stribor.test.base import *
 
 @pytest.mark.parametrize('input_shape', [(1, 1), (2, 10), (7, 4, 5), (2, 3, 4, 5)])
-@pytest.mark.parametrize('dim', [-2, -1])
+@pytest.mark.parametrize('dim', [-1])
 def test_cumsum(input_shape, dim):
-    np.random.seed(123)
     torch.manual_seed(123)
 
-    model = st.Cumsum(dim)
+    f = st.Cumsum(dim)
     x = torch.randn(*input_shape)
 
-    y, log_jac_y = model.forward(x)
-    x_, log_jac_x = model.inverse(y)
+    check_inverse_transform(f, x)
+    check_log_jacobian_determinant(f, x)
 
-    check_inverse(x, x_)
-    check_jacobian(log_jac_x, log_jac_y)
+    y = f(x)
+    assert torch.all(y == x.cumsum(dim))
+
+
+@pytest.mark.parametrize('input_shape', [(1, 1), (2, 10), (7, 4, 5), (2, 3, 4, 5)])
+@pytest.mark.parametrize('dim', [-1])
+def test_diff(input_shape, dim):
+    torch.manual_seed(123)
+
+    f = st.Diff(dim)
+    x = torch.randn(*input_shape)
+    y = x.cumsum(dim)
+
+    check_inverse_transform(f, y)
+    check_log_jacobian_determinant(f, y)
+
+    x_ = f(y)
+    assert torch.allclose(x, x_)
+
 
 @pytest.mark.parametrize('input_shape', [(2, 10), (7, 4, 5), (2, 3, 4, 5)])
 @pytest.mark.parametrize('column', [1, -1, 3])
 def test_cumsum_column(input_shape, column):
-    np.random.seed(123)
     torch.manual_seed(123)
 
-    model = st.CumsumColumn(column)
+    f = st.CumsumColumn(column)
     x = torch.randn(*input_shape)
 
-    y, log_jac_y = model.forward(x)
-    x_, log_jac_x = model.inverse(y)
-
-    check_inverse(x, x_)
-    check_jacobian(log_jac_x, log_jac_y)
+    check_inverse_transform(f, x)

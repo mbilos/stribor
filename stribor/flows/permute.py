@@ -1,10 +1,16 @@
+from typing import List
+from torchtyping import TensorType
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class Flip(nn.Module):
+from stribor import ElementwiseTransform
+
+
+class Flip(ElementwiseTransform):
     """
-    Flip indices transformation.
+    Flips the order of indices along selected dims.
 
     Example:
     >>> f = stribor.Flip()
@@ -21,22 +27,26 @@ class Flip(nn.Module):
         dims (List[int]): Dimensions along which to flip the order of values.
             Default: [-1]
     """
-    def __init__(self, dims=[-1]):
+    def __init__(self, dims: List[int] = [-1]):
         super().__init__()
         self.dims = dims
 
-    def forward(self, x, **kwargs):
-        y = torch.flip(x, self.dims)
-        return y, torch.zeros_like(y)
+    def forward(self, x: TensorType[..., 'dim'], **kwargs) -> TensorType[..., 'dim']:
+        return torch.flip(x, self.dims)
 
-    def inverse(self, y, **kwargs):
-        x = torch.flip(y, self.dims)
-        return x, torch.zeros_like(x)
+    def inverse(self, y: TensorType[..., 'dim'], **kwargs) -> TensorType[..., 'dim']:
+        return torch.flip(y, self.dims)
+
+    def log_det_jacobian(self, x: TensorType[..., 'dim'], y: TensorType[..., 'dim'], **kwargs) -> TensorType[..., 1]:
+        return torch.zeros_like(x[...,:1])
+
+    def log_diag_jacobian(self, x: TensorType[..., 'dim'], y: TensorType[..., 'dim'], **kwargs) -> TensorType[..., 'dim']:
+        return torch.eye(x.shape[-1]).flip(self.dims).diag().log().expand_as(x)
 
 
-class Permute(nn.Module):
+class Permute(ElementwiseTransform):
     """
-    Permute indices along the last dimension.
+    Permutes indices along the last dimension.
 
     Example:
     >>> torch.manual_seed(123)
@@ -49,17 +59,24 @@ class Permute(nn.Module):
     Args:
         dim (int): Dimension of data
     """
-    def __init__(self, dim):
+    def __init__(self, dim: int):
         super().__init__()
+        self.dim = dim
         self.permutation = torch.randperm(dim)
 
         self.inverse_permutation = torch.empty(dim).long()
         self.inverse_permutation[self.permutation] = torch.arange(dim)
 
-    def forward(self, x):
+    def forward(self, x: TensorType[..., 'dim'], **kwargs) -> TensorType[..., 'dim']:
         y = x[..., self.permutation]
-        return y, torch.zeros_like(y)
+        return y
 
-    def inverse(self, y):
+    def inverse(self, y: TensorType[..., 'dim'], **kwargs) -> TensorType[..., 'dim']:
         x = y[..., self.inverse_permutation]
-        return x, torch.zeros_like(x)
+        return x
+
+    def log_det_jacobian(self, x: TensorType[..., 'dim'], y: TensorType[..., 'dim'], **kwargs) -> TensorType[..., 1]:
+        return torch.zeros_like(x[...,:1])
+
+    def log_diag_jacobian(self, x: TensorType[..., 'dim'], y: TensorType[..., 'dim'], **kwargs) -> TensorType[..., 'dim']:
+        return torch.eye(self.dim)[self.permutation].diag().log().expand_as(x)

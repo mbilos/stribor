@@ -1,44 +1,45 @@
+from torchtyping import TensorType
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 class TimeIdentity(nn.Module):
-    def __init__(self, out_dim, **kwargs):
+    def __init__(self, out_dim: int, **kwargs):
         super().__init__()
         self.out_dim = out_dim
 
-    def forward(self, t):
-        assert t.shape[-1] == 1
+    def forward(self, t: TensorType[..., 1]) -> TensorType[..., 'out']:
         return t.repeat_interleave(self.out_dim, dim=-1)
 
-    def derivative(self, t):
+    def derivative(self, t: TensorType[..., 1]) -> TensorType[..., 'out']:
         return torch.ones_like(t).repeat_interleave(self.out_dim, dim=-1)
 
 class TimeLinear(nn.Module):
-    def __init__(self, out_dim, **kwargs):
+    def __init__(self, out_dim: int, **kwargs):
         super().__init__()
         self.scale = nn.Parameter(torch.randn(1, out_dim))
         nn.init.xavier_uniform_(self.scale)
 
-    def forward(self, t):
+    def forward(self, t: TensorType[..., 1]) -> TensorType[..., 'out']:
         return self.scale * t
 
-    def derivative(self, t):
+    def derivative(self, t: TensorType[..., 1]) -> TensorType[..., 'out']:
         return self.scale * torch.ones_like(t)
 
 
 class TimeTanh(TimeLinear):
-    def forward(self, t):
+    def forward(self, t: TensorType[..., 1]) -> TensorType[..., 'out']:
         return torch.tanh(self.scale * t)
 
-    def derivative(self, t):
+    def derivative(self, t: TensorType[..., 1]) -> TensorType[..., 'out']:
         return self.scale * (1 - self.forward(t)**2)
 
 class TimeLog(TimeLinear):
-    def forward(self, t):
+    def forward(self, t: TensorType[..., 1]) -> TensorType[..., 'out']:
         return torch.log(self.scale.exp() * t + 1)
 
-    def derivative(self, t):
+    def derivative(self, t: TensorType[..., 1]) -> TensorType[..., 'out']:
         return self.scale.exp() / (self.scale.exp() * t + 1)
 
 class TimeFourier(nn.Module):
@@ -66,14 +67,14 @@ class TimeFourier(nn.Module):
         else:
             return self.weight / self.hidden_dim
 
-    def forward(self, t):
+    def forward(self, t: TensorType[..., 1]) -> TensorType[..., 'out']:
         t = t.unsqueeze(-1)
         scale = self.get_scale()
         t = scale * torch.sin(self.shift * t)
         t = t.sum(-1)
         return t
 
-    def derivative(self, t):
+    def derivative(self, t: TensorType[..., 1]) -> TensorType[..., 'out']:
         t = t.unsqueeze(-1)
         scale = self.get_scale()
         t = self.shift * scale * torch.cos(self.shift * t)

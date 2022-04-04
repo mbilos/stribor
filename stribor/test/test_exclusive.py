@@ -18,7 +18,7 @@ def test_exclusive_set_net_zero_trace(input_dim, hidden_dims, out_dim, pooling):
     trace_exact = st.util.divergence_from_jacobian(f, x)
 
     assert trace_exact.sum() == 0
-    assert torch.isclose(trace_exact, torch.zeros_like(trace_exact), atol=1e-6).all()
+    assert torch.allclose(trace_exact, torch.zeros_like(trace_exact), atol=1e-6)
 
 
 @pytest.mark.parametrize('input_dim', [(1, 1, 1), (10, 1, 1), (4, 4, 1), (3, 5, 2), (5, 3, 2, 3)])
