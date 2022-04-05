@@ -1,4 +1,4 @@
-# Stibor
+# Stribor
 
 Normalizing flows and neural flows for PyTorch.
 
