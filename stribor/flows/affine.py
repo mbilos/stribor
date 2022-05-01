@@ -2,8 +2,10 @@ from typing import Union, Optional, Tuple
 from torchtyping import TensorType
 from numbers import Number
 
+import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from stribor import Transform, ElementwiseTransform
 
@@ -179,8 +181,9 @@ class AffineLU(Transform):
 
 class MatrixExponential(Transform):
     """
-    Matrix exponential transformation `y = exp(W * t) @ x`.
-    Corresponds to a solution of the linear ODE `dx/dt = W @ x`.
+    Matrix exponential transformation `y = exp(W * t) @ x + b`.
+    Corresponds to a solution of the linear ODE `dx/dt = W @ x`
+    when `bias=False`.
 
     Example:
     >>> torch.manual_seed(123)
@@ -194,19 +197,44 @@ class MatrixExponential(Transform):
     Args:
         dim (int): Dimension of data
     """
-    def __init__(self, dim, **kwargs):
+    def __init__(self, dim: int, bias: bool = False, **kwargs):
         super().__init__()
+        self.dim = dim
 
-        self.weight = nn.Parameter(torch.empty(dim, dim))
+        self._weight = nn.Parameter(torch.empty(dim, dim))
+        self.diag = nn.Parameter(torch.empty(dim))
+        if bias:
+            self.bias = nn.Parameter(torch.empty(dim))
+        else:
+            self.register_parameter('bias', None)
         self.reset_parameters()
 
     def reset_parameters(self):
-        nn.init.xavier_uniform_(self.weight)
+        # Initialization from nn.Linear
+        nn.init.kaiming_uniform_(self._weight, a=math.sqrt(5))
+        fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self._weight)
+        bound = 1 / math.sqrt(fan_in)
+        nn.init.uniform_(self.diag, -bound, bound)
+        if self.bias is not None:
+            nn.init.uniform_(self.bias, -bound, bound)
+
+    def lu(self):
+        eye = torch.eye(self.dim).to(self._weight)
+        L = torch.tril(self._weight, diagonal=-1) + eye
+        U = torch.triu(self._weight) + eye
+        return L, U
+
+    @property
+    def weight(self):
+        # NOTE: Computation might be slow due to inverse
+        L, U = self.lu()
+        W = L @ U
+        W_inv = torch.linalg.inv(W)
+        return (W * self.diag) @ W_inv
 
     def get_time(self, t, shape):
         if isinstance(t, Number):
             t = torch.ones(*shape[:-1], 1) * t
-        t = t.unsqueeze(-1)
         return t
 
     def forward(
@@ -222,11 +250,19 @@ class MatrixExponential(Transform):
 
         t = self.get_time(t, x.shape)
 
-        W = torch.matrix_exp(self.weight * t)
-        y = W @ x.unsqueeze(-1)
-        y = y.squeeze(-1)
+        L, U = self.lu()
 
-        return y
+        x = torch.linalg.solve_triangular(L, x.unsqueeze(-1), upper=False, unitriangular=True).squeeze(-1)
+        x = torch.linalg.solve_triangular(U, x.unsqueeze(-1), upper=True, unitriangular=False).squeeze(-1)
+
+        x = x * (self.diag * t).exp()
+
+        x = F.linear(x, U)
+        x = F.linear(x, L)
+
+        if self.bias is not None:
+            x += self.bias
+        return x
 
     def inverse(
         self,
@@ -244,7 +280,7 @@ class MatrixExponential(Transform):
         **kwargs,
     ) -> TensorType[..., 1]:
         t = self.get_time(t, x.shape)
-        ldj = (self.weight * t).diagonal(dim1=-2, dim2=-1)
+        ldj = (self.weight * t.unsqueeze(-1)).diagonal(dim1=-2, dim2=-1)
         return ldj.expand_as(x).sum(-1, keepdim=True)
 
     def jacobian(
@@ -255,5 +291,5 @@ class MatrixExponential(Transform):
         **kwargs,
     ) -> TensorType[..., 'dim', 'dim']:
         t = self.get_time(t, x.shape)
-        W = torch.matrix_exp(self.weight * t)
+        W = torch.matrix_exp(self.weight * t.unsqueeze(-1))
         return W.expand(*x.shape[:-1], -1, -1)

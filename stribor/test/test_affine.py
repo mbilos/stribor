@@ -61,9 +61,17 @@ def test_matrix_exponential(input_shape):
     dim = input_shape[-1]
 
     x = torch.randn(*input_shape)
+    t = torch.randn(*input_shape[:-1], 1)
 
     f = st.MatrixExponential(dim)
 
     check_inverse_transform(f, x)
+    check_inverse_transform(f, x, t=t)
     check_log_jacobian_determinant(f, x)
+    check_log_jacobian_determinant(f, x, t=t)
     check_gradients_not_nan(f, x)
+    check_gradients_not_nan(f, x, t=t)
+
+    t = torch.zeros(*input_shape[:-1], 1)
+    y = f(x, t=t)
+    assert torch.allclose(x, y, atol=1e-6)
