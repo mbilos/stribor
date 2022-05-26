@@ -56,14 +56,16 @@ def test_lu_affine(input_shape):
 
 
 @pytest.mark.parametrize('input_shape', [(1, 1), (2, 10), (10, 2), (7, 4, 5)])
-def test_matrix_exponential(input_shape):
+@pytest.mark.parametrize('bias', [True, False])
+@pytest.mark.parametrize('log_time', [True, False])
+def test_matrix_exponential(input_shape, bias, log_time):
     torch.manual_seed(123)
     dim = input_shape[-1]
 
     x = torch.randn(*input_shape)
     t = torch.randn(*input_shape[:-1], 1)
 
-    f = st.MatrixExponential(dim)
+    f = st.MatrixExponential(dim, bias=bias, log_time=log_time)
 
     check_inverse_transform(f, x)
     check_inverse_transform(f, x, t=t)
@@ -72,6 +74,7 @@ def test_matrix_exponential(input_shape):
     check_gradients_not_nan(f, x)
     check_gradients_not_nan(f, x, t=t)
 
-    t = torch.zeros(*input_shape[:-1], 1)
-    y = f(x, t=t)
-    assert torch.allclose(x, y, atol=1e-6)
+    if bias is False:
+        t = torch.zeros(*input_shape[:-1], 1)
+        y = f(x, t=t)
+        assert torch.allclose(x, y, atol=1e-6)

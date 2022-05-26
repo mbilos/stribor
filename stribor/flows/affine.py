@@ -197,9 +197,10 @@ class MatrixExponential(Transform):
     Args:
         dim (int): Dimension of data
     """
-    def __init__(self, dim: int, bias: bool = False, **kwargs):
+    def __init__(self, dim: int, bias: bool = False, log_time: bool = False, **kwargs):
         super().__init__()
         self.dim = dim
+        self.log_time = log_time
 
         self._weight = nn.Parameter(torch.empty(dim, dim))
         self.diag = nn.Parameter(torch.empty(dim))
@@ -235,6 +236,8 @@ class MatrixExponential(Transform):
     def get_time(self, t, shape):
         if isinstance(t, Number):
             t = torch.ones(*shape[:-1], 1) * t
+        if self.log_time:
+            t = torch.log1p(t.abs())
         return t
 
     def forward(
@@ -245,10 +248,12 @@ class MatrixExponential(Transform):
         reverse: bool = False,
         **kwargs
     ) -> TensorType[..., 'dim']:
+        t = self.get_time(t, x.shape)
+
         if reverse:
             t = -t
-
-        t = self.get_time(t, x.shape)
+            if self.bias is not None:
+                x = x - self.bias
 
         L, U = self.lu()
 
@@ -260,8 +265,8 @@ class MatrixExponential(Transform):
         x = F.linear(x, U)
         x = F.linear(x, L)
 
-        if self.bias is not None:
-            x += self.bias
+        if reverse is False and self.bias is not None:
+            x = x + self.bias
         return x
 
     def inverse(
@@ -280,8 +285,7 @@ class MatrixExponential(Transform):
         **kwargs,
     ) -> TensorType[..., 1]:
         t = self.get_time(t, x.shape)
-        ldj = (self.weight * t.unsqueeze(-1)).diagonal(dim1=-2, dim2=-1)
-        return ldj.expand_as(x).sum(-1, keepdim=True)
+        return self.diag.sum() * t
 
     def jacobian(
         self,
