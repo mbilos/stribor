@@ -1,8 +1,9 @@
-from typing import Optional
+from typing import Callable, Optional
 from torchtyping import TensorType
 
 import math
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import constraints
 
@@ -119,3 +120,77 @@ class LeakyReLU(ElementwiseTransform):
         left = torch.zeros_like(x)
         right = torch.ones_like(x) * math.log(self.negative_slope)
         return torch.where(x >= 0., left, right)
+
+
+class ContinuousActivation(ElementwiseTransform):
+    """
+    Continuous activation function.
+    At t=0 is identity, as t grows acts more like the original activation.
+
+    Args:
+        activation (callable): An activation function (e.g, `torch.tanh`)
+        temperature (float): How fast the activation becomes like the original
+            as t increases. Higher temperature -> faster
+        learnable (bool): Whether temperature is a learnable parameter
+    """
+    def __init__(
+        self,
+        activation: Callable,
+        temperature: int = 1.,
+        learnable: bool = False,
+    ):
+        super().__init__()
+        self.activation = activation
+        self.temperature = nn.Parameter(torch.tensor(temperature), requires_grad=learnable)
+
+    def forward(
+        self, x: TensorType[..., 'dim'], t: TensorType[..., 1], **kwargs,
+    ) -> TensorType[..., 'dim']:
+        w = torch.tanh(self.temperature * t)
+        return x * (1 - w) + self.activation(x) * w
+
+    def inverse(self, y: TensorType, **kwargs) -> None:
+        raise NotImplementedError
+
+    def log_diag_jacobian(self, x: TensorType, y: TensorType, **kwargs) -> None:
+        raise NotImplementedError
+
+    def log_det_jacobian(self, x: TensorType, y: TensorType, **kwargs) -> None:
+        raise NotImplementedError
+
+
+class ContinuousTanh(ElementwiseTransform):
+    """
+    Continuous activation that is the solution to `dx(t)/dt = tanh(x(t))`.
+
+    Args:
+        log_time (bool): Whether to use time in log domain.
+    """
+    def __init__(self, log_time: bool = False):
+        super().__init__()
+        self.log_time = log_time
+
+    def forward(
+        self, x: TensorType[..., 'dim'], t: TensorType[..., 1], reverse: bool = False, **kwargs,
+    ) -> TensorType[..., 'dim']:
+        if self.log_time:
+            t = torch.log1p(t)
+        if reverse:
+            t = -t
+        return torch.asinh(t.exp() * torch.sinh(x))
+
+    def inverse(
+        self, y: TensorType[..., 'dim'], t: TensorType[..., 1], **kwargs,
+    ) -> TensorType[..., 'dim']:
+        return self.forward(y, t, True)
+
+    def log_diag_jacobian(self, x: TensorType, y: TensorType, t: TensorType, **kwargs) -> None:
+        if self.log_time:
+            t = torch.log1p(t)
+        t = t.exp()
+        diag_jac = t * torch.cosh(x) / torch.sqrt(torch.square(t * torch.sinh(x)) + 1)
+        return diag_jac.log()
+
+    def log_det_jacobian(self, x: TensorType, y: TensorType, t: TensorType, **kwargs) -> None:
+        log_diag_jac = self.log_diag_jacobian(x, y, t)
+        return log_diag_jac.sum(-1, keepdim=True)
