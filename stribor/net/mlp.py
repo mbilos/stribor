@@ -1,4 +1,4 @@
-from typing import Callable, List
+from typing import Union, Callable, List
 from torchtyping import TensorType
 
 import torch.nn as nn
@@ -28,12 +28,17 @@ class MLP(nn.Module):
         in_dim: int,
         hidden_dims: List[int],
         out_dim: int,
-        activation: str = 'Tanh',
+        activation: Union[str, Callable] = 'Tanh',
         final_activation: str = None,
         nn_linear_wrapper_func: Callable = None,
         **kwargs,
     ):
         super().__init__()
+
+        if isinstance(activation, str):
+            activation = getattr(nn, activation)()
+        if isinstance(final_activation, str):
+            final_activation = getattr(nn, final_activation)()
 
         if not nn_linear_wrapper_func:
             nn_linear_wrapper_func = lambda x: x
@@ -43,12 +48,12 @@ class MLP(nn.Module):
         layers = [nn.Linear(in_dim, hidden_dims[0])]
 
         for i in range(len(hidden_dims) - 1):
-            layers.append(getattr(nn, activation)())
+            layers.append(activation)
             layers.append(nn_linear_wrapper_func(nn.Linear(hidden_dims[i], hidden_dims[i+1])))
         layers[-1].bias.data.fill_(0.0)
 
         if final_activation is not None:
-            layers.append(getattr(nn, final_activation)())
+            layers.append(final_activation)
 
         self.net = nn.Sequential(*layers)
 
